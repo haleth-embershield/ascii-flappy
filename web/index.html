@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Neon Geometry Tower Defense</title>
+    <title>ASCII FlappyBird</title>
     <style>
         body {
             font-family: 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
@@ -88,40 +88,6 @@
             color: #000;
             box-shadow: 0 0 10px #0fe;
         }
-        .tower-selection {
-            margin-top: 15px;
-            border: 1px solid #0fe;
-            padding: 10px;
-            border-radius: 4px;
-        }
-        .tower-selection h3 {
-            margin-top: 0;
-            margin-bottom: 10px;
-            color: #0fe;
-        }
-        .tower-buttons {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-            justify-content: center;
-        }
-        .tower-button {
-            background-color: #000;
-            color: #0fe;
-            border: 1px solid #0fe;
-            padding: 8px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-        }
-        .tower-button:hover {
-            background-color: rgba(0, 255, 238, 0.2);
-        }
-        .tower-button.active {
-            background-color: #0fe;
-            color: #000;
-            box-shadow: 0 0 10px #0fe;
-        }
         .controls-info {
             margin-top: 15px;
             margin-bottom: 15px;
@@ -164,11 +130,30 @@
         .log-toggle.collapsed .log-toggle-icon {
             transform: rotate(-90deg);
         }
+        .jump-button {
+            background-color: #000;
+            color: #0fe;
+            border: 2px solid #0fe;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-size: 18px;
+            margin-top: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .jump-button:hover {
+            background-color: #0fe;
+            color: #000;
+            box-shadow: 0 0 15px #0fe;
+        }
+        .jump-button:active {
+            transform: scale(0.95);
+        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Neon Geometry Tower Defense</h1>
+        <h1>ASCII FlappyBird</h1>
         
         <canvas id="canvas" width="800" height="600"></canvas>
         
@@ -177,26 +162,18 @@
             <button id="pause-button">Pause</button>
         </div>
         
-        <div class="tower-selection">
-            <h3>Select Tower</h3>
-            <div class="tower-buttons">
-                <button id="tower-line" class="tower-button active">Line Tower ($50)</button>
-                <button id="tower-triangle" class="tower-button">Triangle Tower ($100)</button>
-                <button id="tower-square" class="tower-button">Square Tower ($75)</button>
-                <button id="tower-pentagon" class="tower-button">Pentagon Tower ($150)</button>
-            </div>
-        </div>
+        <button id="jump-button" class="jump-button">JUMP (Space)</button>
         
         <div class="status">
             <p id="status">WASM module loading...</p>
         </div>
         
         <div class="controls-info">
-            <h3>Keyboard Controls</h3>
+            <h3>Controls</h3>
             <ul>
-                <li>1-4: Select towers</li>
-                <li>ESC: Deselect tower</li>
-                <li>Space: Pause/Resume</li>
+                <li>Space: Jump</li>
+                <li>Click/Tap: Jump</li>
+                <li>P: Pause/Resume</li>
             </ul>
         </div>
         
@@ -218,22 +195,15 @@
         const logContainer = document.getElementById('log-container');
         const startButton = document.getElementById('start-button');
         const pauseButton = document.getElementById('pause-button');
-        const towerButtons = {
-            line: document.getElementById('tower-line'),
-            triangle: document.getElementById('tower-triangle'),
-            square: document.getElementById('tower-square'),
-            pentagon: document.getElementById('tower-pentagon')
-        };
+        const jumpButton = document.getElementById('jump-button');
         
         // Audio system
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const audioBuffers = {};
         const audioFiles = [
-            { name: 'enemyHit', path: 'audio/enemy-hit.ogg' },
-            { name: 'levelComplete', path: 'audio/level-complete.ogg' },
-            { name: 'levelFail', path: 'audio/level-fail.ogg' },
-            { name: 'towerShoot', path: 'audio/tower-shoot.ogg' },
-            { name: 'enemyExplosion', path: 'audio/enemy-explosion.ogg' }
+            { name: 'jump', path: 'audio/jump.ogg' },
+            { name: 'explode', path: 'audio/explode.ogg' },
+            { name: 'failure', path: 'audio/failure.ogg' }
         ];
         
         // Preload all audio files
@@ -272,11 +242,6 @@
         let lastTimestamp = 0;
         let isPaused = false;
         
-        // Game state
-        let currentHoverX = -1;
-        let currentHoverY = -1;
-        let canPlaceTower = false;
-        
         // Define imports globally so it can be accessed from all functions
         const imports = {
             env: {
@@ -293,7 +258,7 @@
                     ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
                     ctx.fillRect(x, y, width, height);
                 },
-                // New drawing functions for tower defense game
+                // Drawing functions
                 drawCircle: (x, y, radius, r, g, b, fill) => {
                     ctx.beginPath();
                     ctx.arc(x, y, radius, 0, Math.PI * 2);
@@ -336,52 +301,6 @@
                     ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
                     ctx.fillText(text, x, y);
                 },
-                // Add preview drawing function
-                drawTowerPreview: (x, y, can_place) => {
-                    if (x < 0 || y < 0) return;
-                    
-                    // Get the range of the currently selected tower
-                    let range = 0;
-                    if (zigModule && typeof zigModule.getTowerRange === 'function') {
-                        range = zigModule.getTowerRange();
-                    } else {
-                        // Default ranges if function not available
-                        const selectedTower = document.querySelector('.tower-button.active');
-                        if (selectedTower) {
-                            if (selectedTower.id === 'tower-line') range = 150;
-                            else if (selectedTower.id === 'tower-triangle') range = 100;
-                            else if (selectedTower.id === 'tower-square') range = 120;
-                            else if (selectedTower.id === 'tower-pentagon') range = 200;
-                        }
-                    }
-                    
-                    // Draw tower placement indicator
-                    ctx.beginPath();
-                    ctx.arc(x, y, 20, 0, Math.PI * 2);
-                    ctx.strokeStyle = can_place ? 'rgba(0, 255, 238, 0.5)' : 'rgba(255, 0, 0, 0.5)';
-                    ctx.lineWidth = 2;
-                    ctx.stroke();
-                    
-                    // Draw tower range indicator if placement is valid
-                    if (can_place && range > 0) {
-                        ctx.beginPath();
-                        ctx.arc(x, y, range, 0, Math.PI * 2);
-                        ctx.strokeStyle = 'rgba(0, 255, 238, 0.2)';
-                        ctx.lineWidth = 1;
-                        ctx.stroke();
-                    }
-                    
-                    if (!can_place) {
-                        // Draw X
-                        ctx.beginPath();
-                        ctx.moveTo(x - 15, y - 15);
-                        ctx.lineTo(x + 15, y + 15);
-                        ctx.moveTo(x + 15, y - 15);
-                        ctx.lineTo(x - 15, y + 15);
-                        ctx.strokeStyle = 'rgba(255, 0, 0, 0.5)';
-                        ctx.stroke();
-                    }
-                },
                 // Audio functions
                 playJumpSound: () => {
                     playSound('jump');
@@ -390,7 +309,7 @@
                     playSound('explode');
                 },
                 playFailSound: () => {
-                    playSound('fail');
+                    playSound('failure');
                 },
             }
         };
@@ -410,11 +329,6 @@
             
             // Call WASM update function
             zigModule.update(deltaTime);
-            
-            // Draw tower preview if hovering
-            if (currentHoverX >= 0 && currentHoverY >= 0) {
-                imports.env.drawTowerPreview(currentHoverX, currentHoverY, canPlaceTower);
-            }
             
             // Request next frame
             animationFrameId = requestAnimationFrame(animate);
@@ -442,25 +356,13 @@
             }
         }
         
-        // Function to select tower type
-        function selectTower(towerType) {
-            // Update UI
-            Object.values(towerButtons).forEach(btn => btn.classList.remove('active'));
+        // Handle jump action
+        function handleJump() {
+            if (!zigModule) return;
             
-            // Set active class based on selection
-            switch(towerType) {
-                case 1: towerButtons.line.classList.add('active'); break;
-                case 2: towerButtons.triangle.classList.add('active'); break;
-                case 3: towerButtons.square.classList.add('active'); break;
-                case 4: towerButtons.pentagon.classList.add('active'); break;
-                default: break; // For ESC key (deselect)
-            }
-            
-            // Call WASM function to set selected tower type
-            if (zigModule && typeof zigModule.selectTowerType === 'function') {
-                zigModule.selectTowerType(towerType);
-            } else {
-                console.warn("selectTowerType function not available in WASM module");
+            // Call WASM function to handle jump
+            if (typeof zigModule.handleJump === 'function') {
+                zigModule.handleJump();
             }
         }
         
@@ -468,12 +370,13 @@
         function handleCanvasClick(event) {
             if (!zigModule || isPaused) return;
             
-            const rect = canvas.getBoundingClientRect();
-            const x = event.clientX - rect.left;
-            const y = event.clientY - rect.top;
-            
             // Call WASM function to handle click
-            zigModule.handleClick(x, y);
+            if (typeof zigModule.handleClick === 'function') {
+                const rect = canvas.getBoundingClientRect();
+                const x = event.clientX - rect.left;
+                const y = event.clientY - rect.top;
+                zigModule.handleClick(x, y);
+            }
         }
         
         // Start the game
@@ -501,6 +404,11 @@
             isPaused = !isPaused;
             statusElement.textContent = isPaused ? "Game paused" : "Game resumed";
             
+            // Call WASM function to toggle pause
+            if (typeof zigModule.togglePause === 'function') {
+                zigModule.togglePause();
+            }
+            
             if (!isPaused && !animationFrameId) {
                 startAnimationLoop();
             }
@@ -515,7 +423,7 @@
                 await preloadAudio();
                 
                 // Then load the WASM file
-                const wasmUrl = 'towerd.wasm';
+                const wasmUrl = 'flapper.wasm';
                 
                 const response = await fetch(wasmUrl);
                 if (!response.ok) {
@@ -540,57 +448,29 @@
                 // Add button event listeners
                 startButton.addEventListener('click', startGame);
                 pauseButton.addEventListener('click', togglePause);
-                
-                // Add tower selection button listeners
-                towerButtons.line.addEventListener('click', () => selectTower(1)); // Line = 1
-                towerButtons.triangle.addEventListener('click', () => selectTower(2)); // Triangle = 2
-                towerButtons.square.addEventListener('click', () => selectTower(3)); // Square = 3
-                towerButtons.pentagon.addEventListener('click', () => selectTower(4)); // Pentagon = 4
+                jumpButton.addEventListener('click', handleJump);
                 
                 // Add keyboard event listener
                 window.addEventListener('keydown', (event) => {
                     if (!zigModule) return;
                     
                     switch(event.key) {
-                        case '1': selectTower(1); break;
-                        case '2': selectTower(2); break;
-                        case '3': selectTower(3); break;
-                        case '4': selectTower(4); break;
-                        case 'Escape': selectTower(0); break; // Deselect tower
                         case ' ': // Space bar
+                            event.preventDefault();
+                            handleJump();
+                            break;
+                        case 'p': // P key
+                        case 'P':
                             event.preventDefault();
                             togglePause();
                             break;
                     }
                 });
                 
-                // Add mouse move listener for tower placement preview
-                canvas.addEventListener('mousemove', (event) => {
-                    if (!zigModule || isPaused) return;
-                    
-                    const rect = canvas.getBoundingClientRect();
-                    const x = event.clientX - rect.left;
-                    const y = event.clientY - rect.top;
-                    
-                    // Snap to grid
-                    currentHoverX = Math.floor(x / 40) * 40 + 20;
-                    currentHoverY = Math.floor(y / 40) * 40 + 20;
-                    
-                    // Check if we can place tower here
-                    if (typeof zigModule.canPlaceTower === 'function') {
-                        canPlaceTower = zigModule.canPlaceTower(currentHoverX, currentHoverY);
-                    }
-                    
-                    // Request a frame update to show hover effect
-                    if (!animationFrameId) {
-                        requestAnimationFrame(animate);
-                    }
-                });
-                
-                // Mouse leave handler
-                canvas.addEventListener('mouseleave', () => {
-                    currentHoverX = -1;
-                    currentHoverY = -1;
+                // Touch events for mobile
+                jumpButton.addEventListener('touchstart', (event) => {
+                    event.preventDefault();
+                    handleJump();
                 });
                 
             } catch (error) {
