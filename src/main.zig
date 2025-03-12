@@ -13,13 +13,13 @@ extern "env" fn playExplodeSound() void;
 extern "env" fn playFailSound() void;
 
 // Game constants
-const GRAVITY: f32 = 1200.0;
-const JUMP_VELOCITY: f32 = -400.0;
+const GRAVITY: f32 = 1600.0;
+const JUMP_VELOCITY: f32 = -500.0;
 const BIRD_SIZE: f32 = 30.0;
 const PIPE_WIDTH: f32 = 80.0;
 const PIPE_GAP: f32 = 200.0;
-const PIPE_SPEED: f32 = 200.0;
-const PIPE_SPAWN_INTERVAL: f32 = 1.5;
+const PIPE_SPEED: f32 = 400.0;
+const PIPE_SPAWN_INTERVAL: f32 = 0.75;
 
 // ASCII rendering constants
 const ASCII_WIDTH: usize = 100; // Characters wide
