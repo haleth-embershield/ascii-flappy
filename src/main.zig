@@ -362,27 +362,55 @@ fn drawGame() void {
     for (game.pipes[0..game.pipe_count]) |pipe| {
         if (!pipe.active) continue;
 
-        const pipe_x: usize = @intFromFloat(pipe.x);
-        const pipe_width: usize = @intFromFloat(PIPE_WIDTH);
-        const gap_y: usize = @intFromFloat(pipe.gap_y);
+        // Skip pipes that are completely off-screen
+        if (pipe.x + PIPE_WIDTH < 0) continue;
+
+        // Safe conversion of float coordinates to usize
+        const pipe_x: usize = if (pipe.x < 0) 0 else @intFromFloat(@max(0, pipe.x));
+        const pipe_width: usize = if (pipe.x < 0)
+            @intFromFloat(@max(0, PIPE_WIDTH + pipe.x)) // Adjust width if pipe is partially off-screen
+        else
+            @intFromFloat(PIPE_WIDTH);
+
+        // Ensure gap_y is within bounds
+        const safe_gap_y = std.math.clamp(pipe.gap_y, PIPE_GAP / 2 + 10, PIXEL_HEIGHT - PIPE_GAP / 2 - 10);
+        const gap_y: usize = @intFromFloat(safe_gap_y);
         const gap_half: usize = @intFromFloat(PIPE_GAP / 2);
 
-        // Draw top pipe
-        renderer.drawRect(game.game_image, pipe_x, 0, pipe_width, gap_y - gap_half, .{ 0, 128, 0 });
+        // Calculate pipe cap position safely
+        const cap_offset: f32 = 5;
+        const cap_x: usize = if (pipe.x - cap_offset < 0) 0 else @intFromFloat(@max(0, pipe.x - cap_offset));
+        const cap_width: usize = if (pipe.x - cap_offset < 0)
+            pipe_width + @as(usize, @intFromFloat(@max(0, pipe.x))) // Adjust cap width if partially off-screen
+        else
+            pipe_width + @as(usize, @intFromFloat(cap_offset * 2));
 
-        // Draw pipe cap
-        renderer.drawRect(game.game_image, pipe_x - 5, gap_y - gap_half - 10, pipe_width + 10, 10, .{ 0, 100, 0 });
+        // Ensure we don't try to draw with negative dimensions
+        if (gap_y > gap_half and pipe_width > 0) {
+            // Draw top pipe (only if there's space)
+            if (gap_y > gap_half) {
+                renderer.drawRect(game.game_image, pipe_x, 0, pipe_width, gap_y - gap_half, .{ 0, 128, 0 });
+            }
 
-        // Draw bottom pipe
-        renderer.drawRect(game.game_image, pipe_x, gap_y + gap_half, pipe_width, PIXEL_HEIGHT - (gap_y + gap_half), .{ 0, 128, 0 });
+            // Draw pipe cap (only if there's space)
+            if (gap_y > gap_half + 10) {
+                renderer.drawRect(game.game_image, cap_x, gap_y - gap_half - 10, cap_width, 10, .{ 0, 100, 0 });
+            }
 
-        // Draw pipe cap
-        renderer.drawRect(game.game_image, pipe_x - 5, gap_y + gap_half, pipe_width + 10, 10, .{ 0, 100, 0 });
+            // Draw bottom pipe
+            if (gap_y + gap_half < PIXEL_HEIGHT) {
+                const bottom_height = PIXEL_HEIGHT - (gap_y + gap_half);
+                renderer.drawRect(game.game_image, pipe_x, gap_y + gap_half, pipe_width, bottom_height, .{ 0, 128, 0 });
+
+                // Draw bottom pipe cap
+                renderer.drawRect(game.game_image, cap_x, gap_y + gap_half, cap_width, 10, .{ 0, 100, 0 });
+            }
+        }
     }
 
-    // Draw bird
-    const bird_x: usize = @intFromFloat(game.bird.x);
-    const bird_y: usize = @intFromFloat(game.bird.y);
+    // Draw bird (with bounds checking)
+    const bird_x: usize = @intFromFloat(@max(0, @min(game.bird.x, @as(f32, @floatFromInt(PIXEL_WIDTH - 1)))));
+    const bird_y: usize = @intFromFloat(@max(0, @min(game.bird.y, @as(f32, @floatFromInt(PIXEL_HEIGHT - 1)))));
     const bird_radius: usize = @intFromFloat(BIRD_SIZE / 2);
 
     renderer.drawCircle(game.game_image, bird_x, bird_y, bird_radius, .{ 255, 255, 0 });
