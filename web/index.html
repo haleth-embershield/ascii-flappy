@@ -199,12 +199,12 @@
 <body>
     <div class="container">
         <div class="ascii-title">
-  _____   _____   _____   _   _        _____  _         _____   _____   _____   __   __
- |  _  | |  ___| |  ___| | | | |      |  ___|| |       |  _  | |  _  | |  _  |  \ \ / /
- | |_| | | |___  | |     | | | |      | |___ | |       | |_| | | |_| | | |_| |   \ V / 
- |  _  | |___  | | |     | | | |      |  ___|| |       |  ___| |  ___| |  _  |    > <  
- | | | |  ___| | | |___  | |_| |      | |    | |___    | |     | |     | | | |   / . \ 
- |_| |_| |_____| |_____| |_____|      |_|    |_____|   |_|     |_|     |_| |_|  /_/ \_\
+  _____   _____   _____   _   _        _____  _       _____   _____   _____  __   __
+ |  _  | |  ___| |  ___| | | | |      |  ___|| |     |  _  | |  _  | |  _  | \ \ / /
+ | |_| | | |___  | |     | | | |      | |___ | |     | |_| | | |_| | | |_| |  \ V / 
+ |  _  | |___  | | |     | | | |      |  ___|| |     |  _  | |  ___| |  ___|   \ /  
+ | | | |  ___| | | |___  | | | |      | |    | |___  | | | | | |     | |       | |  
+ |_| |_| |_____| |_____| |_| |_|      |_|    |_____| |_| |_| |_|     |_|       |_|  
         </div>
         
         <div class="score-display">Score: <span id="score">0</span></div>
@@ -331,11 +331,16 @@
                             highScoreElement.textContent = highScore;
                         }
                         
-                        // Ensure we're not continuing animation if game is over
+                        // For game over, we want to stop the animation loop completely
+                        // after rendering the final frame
                         if (animationFrameId) {
-                            // We don't cancel the animation frame here because we still want to render
-                            // the final game state, but we do set isPaused to true to prevent further updates
-                            isPaused = true;
+                            cancelAnimationFrame(animationFrameId);
+                            animationFrameId = null;
+                            
+                            // Render one final frame to ensure the game over state is displayed correctly
+                            if (zigModule && typeof zigModule.update === 'function') {
+                                zigModule.update(0);
+                            }
                         }
                     }
                 },
@@ -387,11 +392,16 @@
         
         // Animation loop function - define it before using it
         function animate(timestamp) {
+            // If we're in game over state, don't continue the animation loop
+            if (gameOverMessage.classList.contains('visible')) {
+                animationFrameId = null;
+                return;
+            }
+            
             // If paused, don't update game logic but still render the current frame
             if (isPaused) {
-                // For game over state, we still want to render the final frame
+                // Call update with 0 delta time to just render the current state
                 if (zigModule && typeof zigModule.update === 'function') {
-                    // Call update with 0 delta time to just render the current state
                     zigModule.update(0);
                 }
                 
@@ -406,7 +416,7 @@
             
             // Calculate delta time in seconds
             if (!lastTimestamp) lastTimestamp = timestamp;
-            const deltaTime = (timestamp - lastTimestamp) / 1000;
+            const deltaTime = Math.min((timestamp - lastTimestamp) / 1000, 0.1); // Cap delta time to avoid large jumps
             lastTimestamp = timestamp;
             
             // Call WASM update function
@@ -484,6 +494,7 @@
             }
             
             isPaused = false;
+            lastTimestamp = 0; // Reset timestamp to avoid large delta on first frame
             statusElement.textContent = "Game started";
             
             // Start animation loop if not already running

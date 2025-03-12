@@ -58,6 +58,9 @@ const Bird = struct {
         // Update position
         self.y += self.velocity * delta_time;
 
+        // Clamp position to prevent going out of bounds
+        self.y = std.math.clamp(self.y, BIRD_SIZE / 2, PIXEL_HEIGHT - BIRD_SIZE / 2);
+
         // Update rotation based on velocity
         self.rotation = std.math.clamp(self.velocity * 0.1, -45.0, 45.0);
     }
@@ -154,8 +157,11 @@ const GameData = struct {
             self.high_score = self.score;
         }
 
-        // Reset game state
-        self.bird = Bird.init(PIXEL_WIDTH / 4, PIXEL_HEIGHT / 2);
+        // Reset game state with bird in a safe position
+        // Place bird in the middle of the screen, away from edges
+        const safe_x = PIXEL_WIDTH / 4;
+        const safe_y = PIXEL_HEIGHT / 2;
+        self.bird = Bird.init(safe_x, safe_y);
 
         // Clear all existing pipes
         for (0..self.pipe_count) |i| {
@@ -208,6 +214,9 @@ export fn init() void {
         return;
     };
 
+    // Ensure the bird starts in a safe position
+    game.bird = Bird.init(PIXEL_WIDTH / 4, PIXEL_HEIGHT / 2);
+
     logString("ASCII FlappyBird initialized");
 }
 
@@ -238,6 +247,8 @@ export fn handleJump() void {
     if (game.state == GameState.Menu) {
         // Start game if in menu
         game.state = GameState.Playing;
+        // Ensure bird is in a safe position when starting
+        game.bird = Bird.init(PIXEL_WIDTH / 4, PIXEL_HEIGHT / 2);
         return;
     }
 
@@ -271,8 +282,8 @@ fn updateGame(delta_time: f32) void {
     game.bird.update(delta_time);
 
     // Check for collision with floor or ceiling
-    const hit_ceiling = game.bird.y < 0;
-    const hit_floor = game.bird.y > PIXEL_HEIGHT;
+    const hit_ceiling = game.bird.y < BIRD_SIZE / 2; // Use bird radius for better bounds checking
+    const hit_floor = game.bird.y > PIXEL_HEIGHT - BIRD_SIZE / 2;
 
     if (hit_ceiling or hit_floor) {
         gameOver();
