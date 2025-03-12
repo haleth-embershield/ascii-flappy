@@ -71,6 +71,9 @@
   - Option 2: Use a canvas for text rendering (might be more performant)
   - Option 3: Use HTML table with colored cells
 
+*We will use Option 2 for now*
+  - Claude and Grok agree Option 2 is best and that we can " directly write to canvas from WebAssembly memory without creating intermediate DOM structures" per Claude and if thats true then thats exactly what I want.
+
 ## Phase 5: Testing and Optimization
 
 ### 1. Performance Testing
