@@ -171,15 +171,16 @@ pub const font8x8_block: [32][8]u8 = .{
     .{ 0xF0, 0xF0, 0xF0, 0xF0, 0xFF, 0xFF, 0xFF, 0xFF }, // U+259F (boxes right and bottom)
 };
 
-pub fn getCharSet(bytes: []const u8) ![8]u8 {
+/// Get bitmap data for a character
+pub fn getCharBitmap(bytes: []const u8) ![8]u8 {
     const char = try std.unicode.utf8Decode(bytes);
     // 0x2580 is the first block character
+    // if (char >= 0x2580 and char <= 0x259F) {
     if (char > 0x2580 and char <= 0x259F) {
         return font8x8_block[char - 0x2580];
     }
     if (char >= 0 and char <= 0x007F) {
         return font8x8_basic[char];
     }
-    std.debug.print("Character: {any}\n", .{char});
     return error.InvalidChar;
 }
