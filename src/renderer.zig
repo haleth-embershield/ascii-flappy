@@ -571,7 +571,7 @@ pub fn generateAsciiArt(
 
                 const closest = findClosestBrightness(clamped_brightness, params.ascii_chars, params.ascii_info);
 
-                switch (params.dither.?) {
+                switch (params.dither) {
                     DitherType.FloydSteinberg => floydSteinberg(
                         curr_ditherr.?,
                         next_ditherr.?,

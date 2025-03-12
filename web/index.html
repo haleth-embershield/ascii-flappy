@@ -37,11 +37,24 @@
             margin: 20px auto;
             display: block;
             box-shadow: 0 0 15px rgba(15, 238, 210, 0.3);
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
         }
         .status {
             margin-top: 10px;
             color: #0fe;
             font-size: 0.9rem;
+        }
+        .score-display {
+            font-size: 24px;
+            color: #0fe;
+            margin: 10px 0;
+            text-shadow: 0 0 5px #0fe;
+        }
+        .high-score {
+            font-size: 18px;
+            color: #0fe;
+            margin-bottom: 15px;
         }
         .log-container {
             margin-top: 10px;
@@ -149,11 +162,25 @@
         .jump-button:active {
             transform: scale(0.95);
         }
+        .game-over-message {
+            color: #f55;
+            font-size: 24px;
+            margin: 10px 0;
+            text-shadow: 0 0 5px #f55;
+            display: none;
+        }
+        .game-over-message.visible {
+            display: block;
+        }
     </style>
 </head>
 <body>
     <div class="container">
         <h1>ASCII FlappyBird</h1>
+        
+        <div class="score-display">Score: <span id="score">0</span></div>
+        <div class="high-score">High Score: <span id="high-score">0</span></div>
+        <div class="game-over-message" id="game-over-message">GAME OVER - Press Space to restart</div>
         
         <canvas id="canvas" width="800" height="600"></canvas>
         
@@ -196,6 +223,13 @@
         const startButton = document.getElementById('start-button');
         const pauseButton = document.getElementById('pause-button');
         const jumpButton = document.getElementById('jump-button');
+        const scoreElement = document.getElementById('score');
+        const highScoreElement = document.getElementById('high-score');
+        const gameOverMessage = document.getElementById('game-over-message');
+        
+        // Game state
+        let score = 0;
+        let highScore = 0;
         
         // Audio system
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -250,56 +284,57 @@
                     const message = new TextDecoder().decode(buffer.subarray(ptr, ptr + len));
                     console.log(message);
                     addLogEntry(message);
+                    
+                    // Update score display if the message contains score information
+                    if (message.startsWith('Score:')) {
+                        const scoreMatch = message.match(/Score: (\d+)/);
+                        if (scoreMatch && scoreMatch[1]) {
+                            score = parseInt(scoreMatch[1]);
+                            scoreElement.textContent = score;
+                        }
+                    }
+                    
+                    // Update game over message
+                    if (message === 'Game Over!') {
+                        gameOverMessage.classList.add('visible');
+                        if (score > highScore) {
+                            highScore = score;
+                            highScoreElement.textContent = highScore;
+                        }
+                    }
                 },
                 clearCanvas: () => {
                     ctx.clearRect(0, 0, canvas.width, canvas.height);
                 },
-                drawRect: (x, y, width, height, r, g, b) => {
-                    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-                    ctx.fillRect(x, y, width, height);
-                },
-                // Drawing functions
-                drawCircle: (x, y, radius, r, g, b, fill) => {
-                    ctx.beginPath();
-                    ctx.arc(x, y, radius, 0, Math.PI * 2);
-                    if (fill) {
-                        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-                        ctx.fill();
-                    } else {
-                        ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
-                        ctx.lineWidth = 2;
-                        ctx.stroke();
-                    }
-                },
-                drawLine: (x1, y1, x2, y2, thickness, r, g, b) => {
-                    ctx.beginPath();
-                    ctx.moveTo(x1, y1);
-                    ctx.lineTo(x2, y2);
-                    ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
-                    ctx.lineWidth = thickness;
-                    ctx.stroke();
-                },
-                drawTriangle: (x1, y1, x2, y2, x3, y3, r, g, b, fill) => {
-                    ctx.beginPath();
-                    ctx.moveTo(x1, y1);
-                    ctx.lineTo(x2, y2);
-                    ctx.lineTo(x3, y3);
-                    ctx.closePath();
-                    if (fill) {
-                        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-                        ctx.fill();
-                    } else {
-                        ctx.strokeStyle = `rgb(${r}, ${g}, ${b})`;
-                        ctx.lineWidth = 2;
-                        ctx.stroke();
-                    }
-                },
-                drawText: (x, y, text_ptr, text_len, size, r, g, b) => {
+                drawAsciiFrame: (ptr, width, height) => {
+                    // Get the ASCII frame data from WASM memory
                     const buffer = new Uint8Array(zigModule.memory.buffer);
-                    const text = new TextDecoder().decode(buffer.subarray(text_ptr, text_ptr + text_len));
-                    ctx.font = `${size}px sans-serif`;
-                    ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
-                    ctx.fillText(text, x, y);
+                    const frameData = buffer.subarray(ptr, ptr + width * height * 3);
+                    
+                    // Create an ImageData object
+                    const imageData = new ImageData(width, height);
+                    
+                    // Copy RGB data to RGBA ImageData
+                    for (let i = 0, j = 0; i < frameData.length; i += 3, j += 4) {
+                        imageData.data[j] = frameData[i];     // R
+                        imageData.data[j + 1] = frameData[i + 1]; // G
+                        imageData.data[j + 2] = frameData[i + 2]; // B
+                        imageData.data[j + 3] = 255;          // A (fully opaque)
+                    }
+                    
+                    // Clear the canvas
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    
+                    // Draw the image data to the canvas
+                    // Create a temporary canvas to handle the scaling
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = width;
+                    tempCanvas.height = height;
+                    const tempCtx = tempCanvas.getContext('2d');
+                    tempCtx.putImageData(imageData, 0, 0);
+                    
+                    // Draw the scaled image to the main canvas
+                    ctx.drawImage(tempCanvas, 0, 0, width, height, 0, 0, canvas.width, canvas.height);
                 },
                 // Audio functions
                 playJumpSound: () => {
@@ -363,6 +398,9 @@
             // Call WASM function to handle jump
             if (typeof zigModule.handleJump === 'function') {
                 zigModule.handleJump();
+                
+                // Hide game over message when starting a new game
+                gameOverMessage.classList.remove('visible');
             }
         }
         
@@ -376,6 +414,9 @@
                 const x = event.clientX - rect.left;
                 const y = event.clientY - rect.top;
                 zigModule.handleClick(x, y);
+                
+                // Hide game over message when starting a new game
+                gameOverMessage.classList.remove('visible');
             }
         }
         
@@ -386,6 +427,13 @@
             // Reset game state if needed
             if (typeof zigModule.resetGame === 'function') {
                 zigModule.resetGame();
+                
+                // Reset score display
+                score = 0;
+                scoreElement.textContent = '0';
+                
+                // Hide game over message
+                gameOverMessage.classList.remove('visible');
             }
             
             isPaused = false;
@@ -436,8 +484,8 @@
                 const { instance } = await WebAssembly.instantiate(wasmBytes, imports);
                 zigModule = instance.exports;
                 
-                // Initialize the WASM module with canvas dimensions
-                zigModule.init(canvas.width, canvas.height);
+                // Initialize the WASM module
+                zigModule.init();
                 
                 // Update status
                 statusElement.textContent = "WASM module loaded successfully";
@@ -473,6 +521,9 @@
                     handleJump();
                 });
                 
+                // Start the game loop
+                startAnimationLoop();
+                
             } catch (error) {
                 statusElement.textContent = `Error: ${error.message}`;
                 console.error("Initialization error:", error);
@@ -500,6 +551,13 @@
         logToggle.addEventListener('click', () => {
             logContainer.classList.toggle('hidden');
             logToggle.classList.toggle('collapsed');
+        });
+        
+        // Clean up resources when the page is unloaded
+        window.addEventListener('beforeunload', () => {
+            if (zigModule && typeof zigModule.deinit === 'function') {
+                zigModule.deinit();
+            }
         });
     </script>
 </body>

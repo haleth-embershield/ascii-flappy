@@ -2,19 +2,12 @@
 // A simple FlappyBird-style game built with Zig v0.14 targeting WebAssembly
 
 const std = @import("std");
+const renderer = @import("renderer.zig");
 
 // WASM imports for browser interaction
 extern "env" fn consoleLog(ptr: [*]const u8, len: usize) void;
 extern "env" fn clearCanvas() void;
-extern "env" fn drawRect(x: f32, y: f32, width: f32, height: f32, r: u8, g: u8, b: u8) void;
-
-// Additional drawing functions we'll need to implement in JavaScript
-extern "env" fn drawCircle(x: f32, y: f32, radius: f32, r: u8, g: u8, b: u8, fill: bool) void;
-extern "env" fn drawLine(x1: f32, y1: f32, x2: f32, y2: f32, thickness: f32, r: u8, g: u8, b: u8) void;
-extern "env" fn drawTriangle(x1: f32, y1: f32, x2: f32, y2: f32, x3: f32, y3: f32, r: u8, g: u8, b: u8, fill: bool) void;
-extern "env" fn drawText(x: f32, y: f32, text_ptr: [*]const u8, text_len: usize, size: f32, r: u8, g: u8, b: u8) void;
-
-// Audio functions
+extern "env" fn drawAsciiFrame(ptr: [*]const u8, width: usize, height: usize) void;
 extern "env" fn playJumpSound() void;
 extern "env" fn playExplodeSound() void;
 extern "env" fn playFailSound() void;
@@ -27,6 +20,12 @@ const PIPE_WIDTH: f32 = 80.0;
 const PIPE_GAP: f32 = 200.0;
 const PIPE_SPEED: f32 = 200.0;
 const PIPE_SPAWN_INTERVAL: f32 = 1.5;
+
+// ASCII rendering constants
+const ASCII_WIDTH: usize = 100; // Characters wide
+const ASCII_HEIGHT: usize = 75; // Characters tall
+const PIXEL_WIDTH: usize = ASCII_WIDTH * 8; // Each ASCII char is 8x8 pixels
+const PIXEL_HEIGHT: usize = ASCII_HEIGHT * 8;
 
 // Game state enum
 const GameState = enum {
@@ -108,17 +107,33 @@ const GameData = struct {
     score: u32,
     high_score: u32,
     random_seed: u32,
+    // ASCII rendering resources
+    ascii_renderer: renderer.RenderParams,
+    game_image: renderer.Image,
+    ascii_output: []u8,
 
-    fn init() GameData {
+    fn init(alloc: std.mem.Allocator) !GameData {
+        // Initialize ASCII renderer
+        const ascii_renderer = try renderer.createRenderer(alloc);
+
+        // Create game image buffer
+        const game_image = try renderer.createImage(alloc, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
+
+        // Initialize with empty ASCII output
+        const ascii_output = try alloc.alloc(u8, PIXEL_WIDTH * PIXEL_HEIGHT * 3);
+
         return GameData{
             .state = GameState.Menu,
-            .bird = Bird.init(200, 300),
+            .bird = Bird.init(PIXEL_WIDTH / 4, PIXEL_HEIGHT / 2),
             .pipes = undefined,
             .pipe_count = 0,
             .spawn_timer = 0,
             .score = 0,
             .high_score = 0,
             .random_seed = 12345,
+            .ascii_renderer = ascii_renderer,
+            .game_image = game_image,
+            .ascii_output = ascii_output,
         };
     }
 
@@ -140,7 +155,7 @@ const GameData = struct {
         }
 
         // Reset game state
-        self.bird = Bird.init(200, 300);
+        self.bird = Bird.init(PIXEL_WIDTH / 4, PIXEL_HEIGHT / 2);
         self.pipe_count = 0;
         self.spawn_timer = 0;
         self.score = 0;
@@ -152,17 +167,23 @@ const GameData = struct {
 
         // Random gap position between 150 and canvas_height - 150
         const min_gap_y: u32 = 150;
-        const max_gap_y: u32 = @intFromFloat(canvas_height - 150);
+        const max_gap_y: u32 = @intCast(PIXEL_HEIGHT - 150);
         const gap_y = @as(f32, @floatFromInt(self.randomInRange(min_gap_y, max_gap_y)));
 
-        self.pipes[self.pipe_count] = Pipe.init(canvas_width, gap_y);
+        self.pipes[self.pipe_count] = Pipe.init(PIXEL_WIDTH, gap_y);
         self.pipe_count += 1;
+    }
+
+    fn deinit(self: *GameData, alloc: std.mem.Allocator) void {
+        // Free allocated resources
+        self.ascii_renderer.deinit(alloc);
+        renderer.destroyImage(alloc, self.game_image);
+        alloc.free(self.ascii_output);
     }
 };
 
 // Global state
-var canvas_width: f32 = 800;
-var canvas_height: f32 = 600;
+var allocator: std.mem.Allocator = undefined;
 var game: GameData = undefined;
 
 // Helper to log strings to browser console
@@ -171,12 +192,15 @@ fn logString(msg: []const u8) void {
 }
 
 // Initialize the WASM module
-export fn init(width: f32, height: f32) void {
-    canvas_width = width;
-    canvas_height = height;
+export fn init() void {
+    // Initialize allocator
+    allocator = std.heap.page_allocator;
 
     // Initialize game data
-    game = GameData.init();
+    game = GameData.init(allocator) catch {
+        logString("Failed to initialize game");
+        return;
+    };
 
     logString("ASCII FlappyBird initialized");
 }
@@ -194,17 +218,11 @@ export fn update(delta_time: f32) void {
         return;
     }
 
-    // Clear canvas
-    clearCanvas();
-
     // Update game logic
     updateGame(delta_time);
 
     // Draw game elements
-    drawBackground();
-    drawPipes();
-    drawBird();
-    drawUI();
+    drawGame();
 }
 
 // Handle jump (spacebar or click)
@@ -232,7 +250,9 @@ export fn handleJump() void {
 }
 
 // Handle mouse click
-export fn handleClick(_: f32, _: f32) void {
+export fn handleClick(x_pos: f32, y_pos: f32) void {
+    _ = x_pos;
+    _ = y_pos;
     // Just call handleJump for any click
     handleJump();
 }
@@ -244,7 +264,7 @@ fn updateGame(delta_time: f32) void {
 
     // Check for collision with floor or ceiling
     const hit_ceiling = game.bird.y < 0;
-    const hit_floor = game.bird.y > canvas_height;
+    const hit_floor = game.bird.y > PIXEL_HEIGHT;
 
     if (hit_ceiling or hit_floor) {
         gameOver();
@@ -327,88 +347,82 @@ fn gameOver() void {
     logString("Game Over!");
 }
 
-// Draw background
-fn drawBackground() void {
-    // Draw sky
-    drawRect(0, 0, canvas_width, canvas_height, 135, 206, 235);
+// Draw the game using ASCII renderer
+fn drawGame() void {
+    // Clear the image
+    renderer.clearImage(game.game_image, .{ 135, 206, 235 }); // Sky blue background
 
     // Draw ground
-    drawRect(0, canvas_height - 50, canvas_width, 50, 83, 54, 10);
+    renderer.drawRect(game.game_image, 0, PIXEL_HEIGHT - 50, PIXEL_WIDTH, 50, .{ 83, 54, 10 });
 
     // Draw grass
-    drawRect(0, canvas_height - 50, canvas_width, 5, 34, 139, 34);
-}
+    renderer.drawRect(game.game_image, 0, PIXEL_HEIGHT - 50, PIXEL_WIDTH, 5, .{ 34, 139, 34 });
 
-// Draw the bird
-fn drawBird() void {
-    // Draw bird body (circle)
-    drawCircle(game.bird.x, game.bird.y, BIRD_SIZE / 2, 255, 255, 0, true);
-
-    // Draw bird eye
-    drawCircle(game.bird.x + 8, game.bird.y - 5, 5, 0, 0, 0, true);
-
-    // Draw bird beak
-    drawTriangle(game.bird.x + 15, game.bird.y, game.bird.x + 5, game.bird.y - 5, game.bird.x + 5, game.bird.y + 5, 255, 165, 0, true);
-}
-
-// Draw all pipes
-fn drawPipes() void {
+    // Draw pipes
     for (game.pipes[0..game.pipe_count]) |pipe| {
         if (!pipe.active) continue;
 
+        const pipe_x: usize = @intFromFloat(pipe.x);
+        const pipe_width: usize = @intFromFloat(PIPE_WIDTH);
+        const gap_y: usize = @intFromFloat(pipe.gap_y);
+        const gap_half: usize = @intFromFloat(PIPE_GAP / 2);
+
         // Draw top pipe
-        drawRect(pipe.x, 0, PIPE_WIDTH, pipe.gap_y - PIPE_GAP / 2, 0, 128, 0);
+        renderer.drawRect(game.game_image, pipe_x, 0, pipe_width, gap_y - gap_half, .{ 0, 128, 0 });
 
         // Draw pipe cap
-        drawRect(pipe.x - 5, pipe.gap_y - PIPE_GAP / 2 - 10, PIPE_WIDTH + 10, 10, 0, 100, 0);
+        renderer.drawRect(game.game_image, pipe_x - 5, gap_y - gap_half - 10, pipe_width + 10, 10, .{ 0, 100, 0 });
 
         // Draw bottom pipe
-        drawRect(pipe.x, pipe.gap_y + PIPE_GAP / 2, PIPE_WIDTH, canvas_height - (pipe.gap_y + PIPE_GAP / 2), 0, 128, 0);
+        renderer.drawRect(game.game_image, pipe_x, gap_y + gap_half, pipe_width, PIXEL_HEIGHT - (gap_y + gap_half), .{ 0, 128, 0 });
 
         // Draw pipe cap
-        drawRect(pipe.x - 5, pipe.gap_y + PIPE_GAP / 2, PIPE_WIDTH + 10, 10, 0, 100, 0);
+        renderer.drawRect(game.game_image, pipe_x - 5, gap_y + gap_half, pipe_width + 10, 10, .{ 0, 100, 0 });
     }
-}
 
-// Draw game UI
-fn drawUI() void {
+    // Draw bird
+    const bird_x: usize = @intFromFloat(game.bird.x);
+    const bird_y: usize = @intFromFloat(game.bird.y);
+    const bird_radius: usize = @intFromFloat(BIRD_SIZE / 2);
+
+    renderer.drawCircle(game.game_image, bird_x, bird_y, bird_radius, .{ 255, 255, 0 });
+
     // Draw score
-    var score_text_buf: [32]u8 = undefined;
-    const score_text = std.fmt.bufPrint(&score_text_buf, "Score: {d}", .{game.score}) catch "Score: ???";
-    drawText(10, 40, score_text.ptr, score_text.len, 24, 255, 255, 255);
+    // Note: We can't directly draw text with the ASCII renderer
+    // We'll display the score in the HTML UI instead
 
-    // Draw high score
-    var high_score_text_buf: [32]u8 = undefined;
-    const high_score_text = std.fmt.bufPrint(&high_score_text_buf, "High Score: {d}", .{game.high_score}) catch "High Score: ???";
-    drawText(10, 70, high_score_text.ptr, high_score_text.len, 18, 255, 255, 255);
+    // Render the game image to ASCII
+    game.ascii_output = renderer.renderToAscii(allocator, game.game_image, game.ascii_renderer) catch {
+        logString("Failed to render ASCII");
+        return;
+    };
 
-    // Draw game over message if applicable
-    if (game.state == GameState.GameOver) {
-        const game_over_text = "GAME OVER - Press Space to restart";
-        drawText(canvas_width / 2 - 200, canvas_height / 2, game_over_text.ptr, game_over_text.len, 30, 255, 0, 0);
-    }
+    // Send the ASCII frame to JavaScript for display
+    drawAsciiFrame(game.ascii_output.ptr, PIXEL_WIDTH, PIXEL_HEIGHT);
 }
 
 // Draw menu screen
 fn drawMenu() void {
-    // Clear canvas
-    clearCanvas();
+    // Clear the image
+    renderer.clearImage(game.game_image, .{ 135, 206, 235 }); // Sky blue background
 
-    // Draw background
-    drawBackground();
+    // Draw ground
+    renderer.drawRect(game.game_image, 0, PIXEL_HEIGHT - 50, PIXEL_WIDTH, 50, .{ 83, 54, 10 });
 
-    // Draw title
-    const title_text = "ASCII FLAPPY BIRD";
-    drawText(canvas_width / 2 - 150, canvas_height / 2 - 50, title_text.ptr, title_text.len, 36, 255, 255, 255);
+    // Draw grass
+    renderer.drawRect(game.game_image, 0, PIXEL_HEIGHT - 50, PIXEL_WIDTH, 5, .{ 34, 139, 34 });
 
-    // Draw start instruction
-    const start_text = "Press Space to Start";
-    drawText(canvas_width / 2 - 120, canvas_height / 2 + 50, start_text.ptr, start_text.len, 24, 255, 255, 255);
+    // Draw a sample bird in the center
+    renderer.drawCircle(game.game_image, PIXEL_WIDTH / 2, PIXEL_HEIGHT / 2, @intFromFloat(BIRD_SIZE / 2), .{ 255, 255, 0 });
 
-    // Draw bird
-    drawCircle(canvas_width / 2, canvas_height / 2, BIRD_SIZE / 2, 255, 255, 0, true);
-    drawCircle(canvas_width / 2 + 8, canvas_height / 2 - 5, 5, 0, 0, 0, true);
-    drawTriangle(canvas_width / 2 + 15, canvas_height / 2, canvas_width / 2 + 5, canvas_height / 2 - 5, canvas_width / 2 + 5, canvas_height / 2 + 5, 255, 165, 0, true);
+    // Render the menu image to ASCII
+    game.ascii_output = renderer.renderToAscii(allocator, game.game_image, game.ascii_renderer) catch {
+        logString("Failed to render ASCII menu");
+        return;
+    };
+
+    // Send the ASCII frame to JavaScript for display
+    drawAsciiFrame(game.ascii_output.ptr, PIXEL_WIDTH, PIXEL_HEIGHT);
 }
 
 // Toggle pause state
@@ -420,4 +434,10 @@ export fn togglePause() void {
         game.state = GameState.Playing;
         logString("Game resumed");
     }
+}
+
+// Clean up resources when the module is unloaded
+export fn deinit() void {
+    game.deinit(allocator);
+    logString("Game resources freed");
 }
