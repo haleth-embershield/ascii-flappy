@@ -330,6 +330,13 @@
                             highScore = score;
                             highScoreElement.textContent = highScore;
                         }
+                        
+                        // Ensure we're not continuing animation if game is over
+                        if (animationFrameId) {
+                            // We don't cancel the animation frame here because we still want to render
+                            // the final game state, but we do set isPaused to true to prevent further updates
+                            isPaused = true;
+                        }
                     }
                 },
                 clearCanvas: () => {
@@ -380,9 +387,20 @@
         
         // Animation loop function - define it before using it
         function animate(timestamp) {
-            // If paused, don't request next frame
+            // If paused, don't update game logic but still render the current frame
             if (isPaused) {
-                animationFrameId = null;
+                // For game over state, we still want to render the final frame
+                if (zigModule && typeof zigModule.update === 'function') {
+                    // Call update with 0 delta time to just render the current state
+                    zigModule.update(0);
+                }
+                
+                // Request next frame only if we're paused but not in game over
+                if (!gameOverMessage.classList.contains('visible')) {
+                    animationFrameId = requestAnimationFrame(animate);
+                } else {
+                    animationFrameId = null;
+                }
                 return;
             }
             

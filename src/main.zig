@@ -13,13 +13,13 @@ extern "env" fn playExplodeSound() void;
 extern "env" fn playFailSound() void;
 
 // Game constants
-const GRAVITY: f32 = 1600.0;
-const JUMP_VELOCITY: f32 = -500.0;
+const GRAVITY: f32 = 1000.0;
+const JUMP_VELOCITY: f32 = -400.0;
 const BIRD_SIZE: f32 = 30.0;
 const PIPE_WIDTH: f32 = 80.0;
 const PIPE_GAP: f32 = 200.0;
-const PIPE_SPEED: f32 = 400.0;
-const PIPE_SPAWN_INTERVAL: f32 = 0.75;
+const PIPE_SPEED: f32 = 200.0;
+const PIPE_SPAWN_INTERVAL: f32 = 1.5;
 
 // ASCII rendering constants
 const ASCII_WIDTH: usize = 100; // Characters wide
@@ -156,7 +156,13 @@ const GameData = struct {
 
         // Reset game state
         self.bird = Bird.init(PIXEL_WIDTH / 4, PIXEL_HEIGHT / 2);
+
+        // Clear all existing pipes
+        for (0..self.pipe_count) |i| {
+            self.pipes[i].active = false;
+        }
         self.pipe_count = 0;
+
         self.spawn_timer = 0;
         self.score = 0;
         self.state = GameState.Playing;
@@ -213,15 +219,17 @@ export fn resetGame() void {
 
 // Update animation frame
 export fn update(delta_time: f32) void {
-    if (game.state != GameState.Playing) {
+    if (game.state == GameState.Menu) {
         drawMenu();
         return;
     }
 
-    // Update game logic
-    updateGame(delta_time);
+    if (game.state == GameState.Playing) {
+        // Update game logic only when playing
+        updateGame(delta_time);
+    }
 
-    // Draw game elements
+    // Always draw the game for Playing, Paused, and GameOver states
     drawGame();
 }
 
@@ -342,15 +350,26 @@ fn checkCollision(bird: Bird, pipe: Pipe) bool {
 
 // Game over
 fn gameOver() void {
+    if (game.state == GameState.GameOver) return; // Prevent multiple game over calls
+
     game.state = GameState.GameOver;
     playFailSound();
     logString("Game Over!");
+
+    // Update high score if needed
+    if (game.score > game.high_score) {
+        game.high_score = game.score;
+
+        var score_buf: [32]u8 = undefined;
+        const high_score_msg = std.fmt.bufPrint(&score_buf, "New High Score: {d}", .{game.high_score}) catch "New High Score!";
+        logString(high_score_msg);
+    }
 }
 
 // Draw the game using ASCII renderer
 fn drawGame() void {
     // Clear the image
-    renderer.clearImage(game.game_image, .{ 135, 206, 235 }); // Sky blue background
+    renderer.clearImage(game.game_image, .{ 0, 0, 0 }); // Black background
 
     // Draw ground
     renderer.drawRect(game.game_image, 0, PIXEL_HEIGHT - 50, PIXEL_WIDTH, 50, .{ 83, 54, 10 });
@@ -432,7 +451,7 @@ fn drawGame() void {
 // Draw menu screen
 fn drawMenu() void {
     // Clear the image
-    renderer.clearImage(game.game_image, .{ 135, 206, 235 }); // Sky blue background
+    renderer.clearImage(game.game_image, .{ 0, 0, 0 }); // Black background
 
     // Draw ground
     renderer.drawRect(game.game_image, 0, PIXEL_HEIGHT - 50, PIXEL_WIDTH, 50, .{ 83, 54, 10 });
