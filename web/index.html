@@ -213,6 +213,13 @@
         
         <canvas id="canvas" width="800" height="600"></canvas>
         
+        <!-- WebGL error message -->
+        <div id="webgl-error" class="error-message" style="display: none; color: #ff5555; margin: 20px 0; padding: 15px; border: 1px solid #ff3333; background-color: #330000; border-radius: 5px;">
+            <h3 style="margin-top: 0;">WebGL Not Supported</h3>
+            <p>Your browser does not support WebGL, which is required to run this game.</p>
+            <p>Please try using a modern browser like Chrome, Firefox, or Edge.</p>
+        </div>
+        
         <div class="controls">
             <button id="start-button">Start Game</button>
             <button id="pause-button">Pause</button>
@@ -257,6 +264,7 @@
         const scoreElement = document.getElementById('score');
         const highScoreElement = document.getElementById('high-score');
         const gameOverMessage = document.getElementById('game-over-message');
+        const webglErrorElement = document.getElementById('webgl-error');
         
         // Game state
         let score = 0;
@@ -307,14 +315,36 @@
         let lastTimestamp = 0;
         let isPaused = false;
         
+        // Check WebGL support and initialize if available
+        function checkWebGLSupport() {
+            if (!window.AsciiFlappyWebGL || !window.AsciiFlappyWebGL.isSupported()) {
+                // WebGL is not supported
+                webglErrorElement.style.display = 'block';
+                canvas.style.display = 'none';
+                startButton.disabled = true;
+                pauseButton.disabled = true;
+                jumpButton.disabled = true;
+                statusElement.textContent = "Error: WebGL is not supported by your browser";
+                addLogEntry("WebGL is not supported by your browser");
+                return false;
+            }
+            return true;
+        }
+        
         // Initialize WebGL
         function initializeWebGL() {
             if (window.AsciiFlappyWebGL.init(canvas)) {
                 addLogEntry("WebGL initialized successfully");
+                return true;
             } else {
                 addLogEntry("WebGL initialization failed");
                 statusElement.textContent = "Error: WebGL initialization failed";
-                throw new Error("WebGL initialization failed");
+                webglErrorElement.style.display = 'block';
+                canvas.style.display = 'none';
+                startButton.disabled = true;
+                pauseButton.disabled = true;
+                jumpButton.disabled = true;
+                return false;
             }
         }
         
@@ -508,8 +538,15 @@
             try {
                 statusElement.textContent = "Loading audio and WASM module...";
                 
+                // Check WebGL support first
+                if (!checkWebGLSupport()) {
+                    return; // Stop initialization if WebGL is not supported
+                }
+                
                 // Initialize WebGL
-                initializeWebGL();
+                if (!initializeWebGL()) {
+                    return; // Stop initialization if WebGL initialization fails
+                }
                 
                 // First preload all audio files
                 await preloadAudio();

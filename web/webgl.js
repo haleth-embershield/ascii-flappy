@@ -7,6 +7,13 @@ let program = null;
 let positionBuffer = null;
 let texture = null;
 
+// Check if WebGL is supported
+function isWebGLSupported() {
+    const canvas = document.createElement('canvas');
+    return !!(window.WebGLRenderingContext && 
+        (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')));
+}
+
 // Initialize WebGL
 function initWebGL(canvas) {
     // Try to get WebGL context
@@ -150,5 +157,6 @@ function renderAsciiFrameWebGL(ptr, width, height, zigMemory) {
 // Export functions
 window.AsciiFlappyWebGL = {
     init: initWebGL,
-    render: renderAsciiFrameWebGL
+    render: renderAsciiFrameWebGL,
+    isSupported: isWebGLSupported
 }; 
