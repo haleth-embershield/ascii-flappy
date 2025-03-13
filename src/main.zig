@@ -92,8 +92,8 @@ const Pipe = struct {
         // Move pipe to the left
         self.x -= PIPE_SPEED * delta_time;
 
-        // Deactivate if off screen
-        if (self.x < -PIPE_WIDTH) {
+        // Deactivate if completely off screen (including the cap width)
+        if (self.x < -(PIPE_WIDTH + 20)) {
             self.active = false;
         }
     }
@@ -387,12 +387,13 @@ fn checkCollision(bird: Bird, pipe: Pipe) bool {
     // Bird hitbox (simplified as a circle)
     const bird_radius = BIRD_SIZE / 2;
 
-    // Check if bird is within pipe's x-range
+    // Check if bird is within pipe's x-range (including caps)
+    const pipe_left = pipe.x - 10; // Account for cap extending to the left
+    const pipe_right = pipe.x + PIPE_WIDTH + 10; // Account for cap extending to the right
     const bird_right = bird.x + bird_radius;
     const bird_left = bird.x - bird_radius;
-    const pipe_right = pipe.x + PIPE_WIDTH;
 
-    const is_within_x_range = bird_right > pipe.x and bird_left < pipe_right;
+    const is_within_x_range = bird_right > pipe_left and bird_left < pipe_right;
 
     if (is_within_x_range) {
         // Check if bird is outside the gap
@@ -401,10 +402,15 @@ fn checkCollision(bird: Bird, pipe: Pipe) bool {
         const gap_top = pipe.gap_y - PIPE_GAP / 2;
         const gap_bottom = pipe.gap_y + PIPE_GAP / 2;
 
+        // Check for collision with pipe body
         const is_above_gap = bird_top < gap_top;
         const is_below_gap = bird_bottom > gap_bottom;
 
-        if (is_above_gap or is_below_gap) {
+        // Check for collision with pipe caps
+        const is_at_gap_edge_top = bird_bottom > gap_top - 15 and bird_top < gap_top;
+        const is_at_gap_edge_bottom = bird_top < gap_bottom + 15 and bird_bottom > gap_bottom;
+
+        if (is_above_gap or is_below_gap or (is_at_gap_edge_top and bird_right > pipe_left) or (is_at_gap_edge_bottom and bird_right > pipe_left)) {
             return true;
         }
     }
@@ -450,7 +456,10 @@ fn drawGame() void {
 
         // Draw pipe body
         const pipe_x: usize = @intFromFloat(@max(0, pipe.x));
-        const pipe_width: usize = @intFromFloat(PIPE_WIDTH);
+        const pipe_width: usize = if (pipe.x < 0)
+            @intFromFloat(@min(PIPE_WIDTH + pipe.x, PIPE_WIDTH)) // Adjust width for partially off-screen pipes
+        else
+            @intFromFloat(PIPE_WIDTH);
         const gap_y: usize = @intFromFloat(pipe.gap_y);
         const gap_half: usize = @intFromFloat(PIPE_GAP / 2);
 
@@ -464,11 +473,11 @@ fn drawGame() void {
             renderer.drawRect(game.game_image, pipe_x, 0, pipe_width, gap_y - gap_half, .{ 0, 255, 0 });
 
             // Draw top pipe cap with even brighter color
-            const cap_width = pipe_width + 20; // Wider cap for better visibility
+            const cap_width = @min(pipe_width + 20, PIXEL_WIDTH - pipe_x); // Wider cap for better visibility, but don't exceed screen width
             const cap_x = if (pipe_x >= 10) pipe_x - 10 else 0;
             // Draw a black border around the cap - with safe bounds checking
             const cap_border_x = if (cap_x >= 2) cap_x - 2 else 0;
-            const cap_border_width = cap_width + 4;
+            const cap_border_width = @min(cap_width + 4, PIXEL_WIDTH - cap_border_x);
             const cap_y_pos = if (gap_y > gap_half + 17) gap_y - gap_half - 17 else 0;
             const cap_height = if (gap_y > gap_half + 17) 19 else gap_y - gap_half;
             renderer.drawRect(game.game_image, cap_border_x, cap_y_pos, cap_border_width, cap_height, .{ 0, 0, 0 });
@@ -489,11 +498,11 @@ fn drawGame() void {
 
             // Draw bottom pipe cap with even brighter color
             if (pipe_x > 10) {
-                const cap_width = pipe_width + 20; // Wider cap for better visibility
+                const cap_width = @min(pipe_width + 20, PIXEL_WIDTH - pipe_x); // Wider cap for better visibility, but don't exceed screen width
                 const cap_x = if (pipe_x >= 10) pipe_x - 10 else 0;
                 // Draw a black border around the cap - with safe bounds checking
                 const cap_border_x = if (cap_x >= 2) cap_x - 2 else 0;
-                const cap_border_width = cap_width + 4;
+                const cap_border_width = @min(cap_width + 4, PIXEL_WIDTH - cap_border_x);
                 // Make sure we don't exceed the image height
                 const cap_border_height = @min(19, PIXEL_HEIGHT - (gap_y + gap_half));
                 renderer.drawRect(game.game_image, cap_border_x, gap_y + gap_half, cap_border_width, cap_border_height, .{ 0, 0, 0 });

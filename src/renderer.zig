@@ -710,7 +710,7 @@ pub fn resizeImage(allocator: std.mem.Allocator, img: Image, new_width: usize, n
 
 /// Create a new renderer configuration with default settings
 pub fn createRenderer(allocator: std.mem.Allocator) !RenderParams {
-    const ascii_chars = " .:-=+*%@#"; // Default character set
+    const ascii_chars = " .:-=+*#@%"; // Reordered for better visibility
     const ascii_info = try initAsciiChars(allocator, ascii_chars);
 
     return RenderParams{
@@ -718,7 +718,7 @@ pub fn createRenderer(allocator: std.mem.Allocator) !RenderParams {
         .ascii_info = ascii_info,
         .color = true,
         .invert_color = false,
-        .block_size = 8,
+        .block_size = 4, // Reduced from 8 to 4 for better performance
         .detect_edges = false,
         .sigma1 = 0.5,
         .sigma2 = 1.0,
@@ -900,11 +900,11 @@ pub export fn render_game_frame(ptr: [*]u8, width: usize, height: usize, channel
         .ascii_info = ascii_info,
         .color = true,
         .invert_color = false,
-        .block_size = 8,
+        .block_size = 4,
         .detect_edges = false,
         .sigma1 = 0.5,
         .sigma2 = 1.0,
-        .brightness_boost = 1.5, // Increase brightness boost to make bright colors more visible
+        .brightness_boost = 1.5,
         .threshold_disabled = false,
         .dither = .None,
         .bg_color = null,
