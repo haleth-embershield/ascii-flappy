@@ -147,16 +147,8 @@ function renderAsciiFrameWebGL(ptr, width, height, zigMemory) {
     return true;
 }
 
-// Check if WebGL is supported
-function isWebGLSupported() {
-    const canvas = document.createElement('canvas');
-    return !!(window.WebGLRenderingContext && 
-        (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')));
-}
-
 // Export functions
 window.AsciiFlappyWebGL = {
     init: initWebGL,
-    render: renderAsciiFrameWebGL,
-    isSupported: isWebGLSupported
+    render: renderAsciiFrameWebGL
 }; 

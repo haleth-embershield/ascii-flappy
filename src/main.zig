@@ -7,7 +7,6 @@ const renderer = @import("renderer.zig");
 // WASM imports for browser interaction
 extern "env" fn consoleLog(ptr: [*]const u8, len: usize) void;
 extern "env" fn clearCanvas() void;
-extern "env" fn drawAsciiFrame(ptr: [*]const u8, width: usize, height: usize) void;
 extern "env" fn playJumpSound() void;
 extern "env" fn playExplodeSound() void;
 extern "env" fn playFailSound() void;
@@ -395,44 +394,30 @@ fn drawGame() void {
         // Skip pipes that are completely off-screen
         if (pipe.x + PIPE_WIDTH < 0) continue;
 
-        // Safe conversion of float coordinates to usize
-        const pipe_x: usize = if (pipe.x < 0) 0 else @intFromFloat(@max(0, pipe.x));
-        const pipe_width: usize = if (pipe.x < 0)
-            @intFromFloat(@max(0, PIPE_WIDTH + pipe.x)) // Adjust width if pipe is partially off-screen
-        else
-            @intFromFloat(PIPE_WIDTH);
-
-        // Ensure gap_y is within bounds
-        const safe_gap_y = std.math.clamp(pipe.gap_y, PIPE_GAP / 2 + 10, PIXEL_HEIGHT - PIPE_GAP / 2 - 10);
-        const gap_y: usize = @intFromFloat(safe_gap_y);
+        // Draw pipe body
+        const pipe_x: usize = @intFromFloat(@max(0, pipe.x));
+        const pipe_width: usize = @intFromFloat(PIPE_WIDTH);
+        const gap_y: usize = @intFromFloat(pipe.gap_y);
         const gap_half: usize = @intFromFloat(PIPE_GAP / 2);
 
-        // Calculate pipe cap position safely
-        const cap_offset: f32 = 5;
-        const cap_x: usize = if (pipe.x - cap_offset < 0) 0 else @intFromFloat(@max(0, pipe.x - cap_offset));
-        const cap_width: usize = if (pipe.x - cap_offset < 0)
-            pipe_width + @as(usize, @intFromFloat(@max(0, pipe.x))) // Adjust cap width if partially off-screen
-        else
-            pipe_width + @as(usize, @intFromFloat(cap_offset * 2));
+        // Top pipe
+        if (gap_y > gap_half) {
+            renderer.drawRect(game.game_image, pipe_x, 0, pipe_width, gap_y - gap_half, .{ 0, 150, 0 });
 
-        // Ensure we don't try to draw with negative dimensions
-        if (gap_y > gap_half and pipe_width > 0) {
-            // Draw top pipe (only if there's space)
-            if (gap_y > gap_half) {
-                renderer.drawRect(game.game_image, pipe_x, 0, pipe_width, gap_y - gap_half, .{ 0, 128, 0 });
-            }
+            // Draw top pipe cap
+            const cap_width = pipe_width + 10;
+            const cap_x = if (pipe_x > 5) pipe_x - 5 else 0;
+            renderer.drawRect(game.game_image, cap_x, gap_y - gap_half - 10, cap_width, 10, .{ 0, 100, 0 });
+        }
 
-            // Draw pipe cap (only if there's space)
-            if (gap_y > gap_half + 10) {
-                renderer.drawRect(game.game_image, cap_x, gap_y - gap_half - 10, cap_width, 10, .{ 0, 100, 0 });
-            }
+        // Bottom pipe
+        if (gap_y + gap_half < PIXEL_HEIGHT) {
+            renderer.drawRect(game.game_image, pipe_x, gap_y + gap_half, pipe_width, PIXEL_HEIGHT - (gap_y + gap_half), .{ 0, 150, 0 });
 
-            // Draw bottom pipe
-            if (gap_y + gap_half < PIXEL_HEIGHT) {
-                const bottom_height = PIXEL_HEIGHT - (gap_y + gap_half);
-                renderer.drawRect(game.game_image, pipe_x, gap_y + gap_half, pipe_width, bottom_height, .{ 0, 128, 0 });
-
-                // Draw bottom pipe cap
+            // Draw bottom pipe cap
+            if (pipe_x > 5) {
+                const cap_width = pipe_width + 10;
+                const cap_x = if (pipe_x > 5) pipe_x - 5 else 0;
                 renderer.drawRect(game.game_image, cap_x, gap_y + gap_half, cap_width, 10, .{ 0, 100, 0 });
             }
         }
@@ -455,8 +440,8 @@ fn drawGame() void {
         return;
     };
 
-    // Send the ASCII frame to JavaScript for display
-    drawAsciiFrame(game.ascii_output.ptr, PIXEL_WIDTH, PIXEL_HEIGHT);
+    // Render directly to WebGL
+    renderer.render_game_frame(game.ascii_output.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
 }
 
 // Draw menu screen
@@ -479,8 +464,8 @@ fn drawMenu() void {
         return;
     };
 
-    // Send the ASCII frame to JavaScript for display
-    drawAsciiFrame(game.ascii_output.ptr, PIXEL_WIDTH, PIXEL_HEIGHT);
+    // Render directly to WebGL
+    renderer.render_game_frame(game.ascii_output.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
 }
 
 // Toggle pause state

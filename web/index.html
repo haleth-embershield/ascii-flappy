@@ -194,22 +194,6 @@
             font-size: 12px;
             text-align: center;
         }
-        
-        /* Render mode toggle */
-        .render-mode {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            margin: 10px 0;
-            font-size: 14px;
-        }
-        .render-mode label {
-            margin-left: 10px;
-            cursor: pointer;
-        }
-        .render-mode input {
-            cursor: pointer;
-        }
     </style>
 </head>
 <body>
@@ -228,11 +212,6 @@
         <div class="game-over-message" id="game-over-message">GAME OVER - Press Space to restart</div>
         
         <canvas id="canvas" width="800" height="600"></canvas>
-        
-        <div class="render-mode">
-            <input type="checkbox" id="use-webgl" checked>
-            <label for="use-webgl">Use WebGL rendering (faster)</label>
-        </div>
         
         <div class="controls">
             <button id="start-button">Start Game</button>
@@ -270,7 +249,6 @@
     <script>
         // DOM elements
         const canvas = document.getElementById('canvas');
-        const ctx = canvas.getContext('2d');
         const statusElement = document.getElementById('status');
         const logContainer = document.getElementById('log-container');
         const startButton = document.getElementById('start-button');
@@ -279,11 +257,6 @@
         const scoreElement = document.getElementById('score');
         const highScoreElement = document.getElementById('high-score');
         const gameOverMessage = document.getElementById('game-over-message');
-        const useWebGLCheckbox = document.getElementById('use-webgl');
-        
-        // WebGL state
-        let webglSupported = false;
-        let useWebGL = true;
         
         // Game state
         let score = 0;
@@ -334,29 +307,15 @@
         let lastTimestamp = 0;
         let isPaused = false;
         
-        // Check WebGL support and initialize if available
-        function checkWebGLSupport() {
-            webglSupported = window.AsciiFlappyWebGL && window.AsciiFlappyWebGL.isSupported();
-            
-            if (webglSupported) {
-                // Initialize WebGL
-                if (window.AsciiFlappyWebGL.init(canvas)) {
-                    addLogEntry("WebGL initialized successfully");
-                    useWebGLCheckbox.disabled = false;
-                } else {
-                    addLogEntry("WebGL initialization failed, falling back to Canvas");
-                    webglSupported = false;
-                    useWebGLCheckbox.checked = false;
-                    useWebGLCheckbox.disabled = true;
-                }
+        // Initialize WebGL
+        function initializeWebGL() {
+            if (window.AsciiFlappyWebGL.init(canvas)) {
+                addLogEntry("WebGL initialized successfully");
             } else {
-                addLogEntry("WebGL not supported, using Canvas rendering");
-                useWebGLCheckbox.checked = false;
-                useWebGLCheckbox.disabled = true;
+                addLogEntry("WebGL initialization failed");
+                statusElement.textContent = "Error: WebGL initialization failed";
+                throw new Error("WebGL initialization failed");
             }
-            
-            // Set initial WebGL usage based on support
-            useWebGL = webglSupported && useWebGLCheckbox.checked;
         }
         
         // Define imports globally so it can be accessed from all functions
@@ -399,45 +358,7 @@
                     }
                 },
                 clearCanvas: () => {
-                    if (!useWebGL || !webglSupported) {
-                        ctx.clearRect(0, 0, canvas.width, canvas.height);
-                    }
-                    // When using WebGL, clearing is handled in the render function
-                },
-                drawAsciiFrame: (ptr, width, height) => {
-                    if (useWebGL && webglSupported) {
-                        // Use WebGL rendering
-                        window.AsciiFlappyWebGL.render(ptr, width, height, zigModule.memory);
-                    } else {
-                        // Fallback to Canvas rendering
-                        const buffer = new Uint8Array(zigModule.memory.buffer);
-                        const frameData = buffer.subarray(ptr, ptr + width * height * 3);
-                        
-                        // Create an ImageData object
-                        const imageData = new ImageData(width, height);
-                        
-                        // Copy RGB data to RGBA ImageData
-                        for (let i = 0, j = 0; i < frameData.length; i += 3, j += 4) {
-                            imageData.data[j] = frameData[i];     // R
-                            imageData.data[j + 1] = frameData[i + 1]; // G
-                            imageData.data[j + 2] = frameData[i + 2]; // B
-                            imageData.data[j + 3] = 255;          // A (fully opaque)
-                        }
-                        
-                        // Clear the canvas
-                        ctx.clearRect(0, 0, canvas.width, canvas.height);
-                        
-                        // Draw the image data to the canvas
-                        // Create a temporary canvas to handle the scaling
-                        const tempCanvas = document.createElement('canvas');
-                        tempCanvas.width = width;
-                        tempCanvas.height = height;
-                        const tempCtx = tempCanvas.getContext('2d');
-                        tempCtx.putImageData(imageData, 0, 0);
-                        
-                        // Draw the scaled image to the main canvas
-                        ctx.drawImage(tempCanvas, 0, 0, width, height, 0, 0, canvas.width, canvas.height);
-                    }
+                    // WebGL clearing is handled in the render function
                 },
                 // Audio functions
                 playJumpSound: () => {
@@ -587,8 +508,8 @@
             try {
                 statusElement.textContent = "Loading audio and WASM module...";
                 
-                // Check WebGL support
-                checkWebGLSupport();
+                // Initialize WebGL
+                initializeWebGL();
                 
                 // First preload all audio files
                 await preloadAudio();
@@ -620,12 +541,6 @@
                 startButton.addEventListener('click', startGame);
                 pauseButton.addEventListener('click', togglePause);
                 jumpButton.addEventListener('click', handleJump);
-                
-                // Add WebGL toggle event listener
-                useWebGLCheckbox.addEventListener('change', (event) => {
-                    useWebGL = event.target.checked && webglSupported;
-                    addLogEntry(`Switched to ${useWebGL ? 'WebGL' : 'Canvas'} rendering`);
-                });
                 
                 // Add keyboard event listener
                 window.addEventListener('keydown', (event) => {

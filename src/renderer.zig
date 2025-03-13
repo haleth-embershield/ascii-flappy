@@ -78,6 +78,20 @@ const BlockInfo = struct {
 };
 
 // -----------------------
+// WebGL BINDINGS
+// -----------------------
+
+/// WebGL constants
+const GL_TEXTURE_2D: u32 = 0x0DE1;
+const GL_RGB: u32 = 0x1907;
+const GL_UNSIGNED_BYTE: u32 = 0x1401;
+const GL_TRIANGLE_STRIP: u32 = 0x0005;
+
+/// WebGL function bindings
+extern fn glTexImage2D(target: u32, level: i32, internalformat: u32, width: i32, height: i32, border: i32, format: u32, type: u32, pixels: [*]const u8) void;
+extern fn glDrawArrays(mode: u32, first: i32, count: i32) void;
+
+// -----------------------
 // CORE RENDERER FUNCTIONS
 // -----------------------
 
@@ -856,4 +870,61 @@ pub fn renderGameFrame(
 
     // Convert to ASCII art
     return renderToAscii(allocator, frame, renderer);
+}
+
+/// Render a frame with WebGL support
+/// This function uploads the texture to WebGL and handles rendering
+export fn render_game_frame(ptr: [*]u8, width: usize, height: usize, channels: usize) void {
+    var allocator = std.heap.wasm_allocator;
+
+    // Create image from input buffer
+    const img = Image{
+        .data = ptr[0 .. width * height * channels],
+        .width = width,
+        .height = height,
+        .channels = channels,
+    };
+
+    // Create renderer parameters
+    const ascii_chars = " .:-=+*%@#";
+    const ascii_info = initAsciiChars(allocator, ascii_chars) catch {
+        return;
+    };
+
+    const params = RenderParams{
+        .ascii_chars = ascii_chars,
+        .ascii_info = ascii_info,
+        .color = true,
+        .invert_color = false,
+        .block_size = 8,
+        .detect_edges = false,
+        .sigma1 = 0.5,
+        .sigma2 = 1.0,
+        .brightness_boost = 1.0,
+        .threshold_disabled = false,
+        .dither = .None,
+        .bg_color = null,
+        .fg_color = null,
+    };
+    defer params.deinit(allocator);
+
+    // Render the ASCII frame
+    const frame = renderToAscii(allocator, img, params) catch {
+        return;
+    };
+    defer allocator.free(frame);
+
+    // Upload texture to WebGL
+    glTexImage2D(GL_TEXTURE_2D, 0, // level
+        GL_RGB, // internal format
+        @intCast(width), // width
+        @intCast(height), // height
+        0, // border
+        GL_RGB, // format
+        GL_UNSIGNED_BYTE, // type
+        frame.ptr // data
+    );
+
+    // Draw the quad
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }
