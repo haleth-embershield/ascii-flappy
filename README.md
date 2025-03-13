@@ -135,6 +135,30 @@ During the development of this project, several important lessons were learned:
 - [ ] Explore more advanced ASCII rendering techniques
 - [ ] Implement multi-threading with Web Workers
 
+## Advanced Features
+- [ ] Implement shader effects (optional)
+- [ ] Add post-processing capabilities
+- [ ] Support dynamic resolution scaling
+- [ ] Explore glyph-based rendering with texture atlas
+```zig
+// Potential glyph-based approach
+const GlyphOutput = struct {
+    indices: []u8,      // Glyph indices
+    atlas: []u8,        // Texture atlas containing glyphs
+    colors: []u8,       // Color information
+};
+
+fn renderAsGlyphs(img: Image, params: RenderParams) !GlyphOutput {
+    // Implementation that outputs glyph indices instead of direct RGB
+}
+```
+
+## Refactoring
+- [ ] Refactor code for cleaner WebGL integration
+- [ ] Create abstraction layer for rendering backend
+- [ ] Improve error handling and recovery
+- [ ] Clean up deprecated code paths
+
 ## License
 
 This project is licensed under the MIT License - see the LICENSE file for details.
