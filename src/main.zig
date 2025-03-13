@@ -597,6 +597,12 @@ export fn togglePause() void {
     }
 }
 
+// Toggle ASCII rendering on/off
+export fn setUseAscii(use_ascii: bool) void {
+    game.ascii_renderer.use_ascii = use_ascii;
+    logString(if (use_ascii) "ASCII rendering enabled" else "ASCII rendering disabled");
+}
+
 // Clean up resources when the module is unloaded
 export fn deinit() void {
     game.deinit(allocator);

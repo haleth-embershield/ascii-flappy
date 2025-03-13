@@ -61,6 +61,8 @@ pub const RenderParams = struct {
     bg_color: ?[3]u8 = null,
     /// Foreground color (RGB)
     fg_color: ?[3]u8 = null,
+    /// Toggle ASCII rendering on/off
+    use_ascii: bool = true,
 
     /// Free allocated resources
     pub fn deinit(self: *RenderParams, allocator: std.mem.Allocator) void {
@@ -718,7 +720,7 @@ pub fn createRenderer(allocator: std.mem.Allocator) !RenderParams {
         .ascii_info = ascii_info,
         .color = true,
         .invert_color = false,
-        .block_size = 4, // Reduced from 8 to 4 for better performance
+        .block_size = 4, // Reduced from 8 to 4 for better resolution
         .detect_edges = false,
         .sigma1 = 0.5,
         .sigma2 = 1.0,
@@ -727,6 +729,7 @@ pub fn createRenderer(allocator: std.mem.Allocator) !RenderParams {
         .dither = .None,
         .bg_color = null,
         .fg_color = null,
+        .use_ascii = true,
     };
 }
 
@@ -890,24 +893,38 @@ pub export fn render_game_frame(ptr: [*]u8, width: usize, height: usize, channel
     // We'll get this from the game object in main.zig
     const params = @import("main.zig").getRendererParams();
 
-    // Render the ASCII frame
-    const frame = renderToAscii(allocator, img, params) catch {
-        const error_msg = "Failed to render ASCII frame";
-        consoleLog(error_msg.ptr, error_msg.len);
-        return;
-    };
-    defer allocator.free(frame);
+    // Check if ASCII rendering is enabled
+    if (params.use_ascii) {
+        // Render the ASCII frame
+        const frame = renderToAscii(allocator, img, params) catch {
+            const error_msg = "Failed to render ASCII frame";
+            consoleLog(error_msg.ptr, error_msg.len);
+            return;
+        };
+        defer allocator.free(frame);
 
-    // Upload texture to WebGL
-    glTexImage2D(GL_TEXTURE_2D, 0, // level
-        GL_RGB, // internal format
-        @intCast(width), // width
-        @intCast(height), // height
-        0, // border
-        GL_RGB, // format
-        GL_UNSIGNED_BYTE, // type
-        frame.ptr // data
-    );
+        // Upload texture to WebGL
+        glTexImage2D(GL_TEXTURE_2D, 0, // level
+            GL_RGB, // internal format
+            @intCast(width), // width
+            @intCast(height), // height
+            0, // border
+            GL_RGB, // format
+            GL_UNSIGNED_BYTE, // type
+            frame.ptr // data
+        );
+    } else {
+        // Upload the original RGB buffer directly
+        glTexImage2D(GL_TEXTURE_2D, 0, // level
+            GL_RGB, // internal format
+            @intCast(width), // width
+            @intCast(height), // height
+            0, // border
+            GL_RGB, // format
+            GL_UNSIGNED_BYTE, // type
+            img.data.ptr // data
+        );
+    }
 
     // Draw the quad
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);

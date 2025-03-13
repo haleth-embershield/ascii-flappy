@@ -184,6 +184,57 @@
             display: block;
         }
         
+        /* ASCII toggle styling */
+        .ascii-toggle {
+            display: flex;
+            align-items: center;
+            margin-left: 10px;
+            background-color: #222;
+            padding: 5px 10px;
+            border-radius: 4px;
+            border: 1px solid #444;
+        }
+        
+        .ascii-toggle label {
+            margin-right: 8px;
+            color: #c0c0c0;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .ascii-toggle input[type="checkbox"] {
+            appearance: none;
+            -webkit-appearance: none;
+            width: 40px;
+            height: 20px;
+            background-color: #333;
+            border-radius: 10px;
+            position: relative;
+            cursor: pointer;
+            outline: none;
+            transition: background-color 0.3s;
+        }
+        
+        .ascii-toggle input[type="checkbox"]::before {
+            content: '';
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            top: 2px;
+            left: 2px;
+            background-color: #c0c0c0;
+            transition: transform 0.3s;
+        }
+        
+        .ascii-toggle input[type="checkbox"]:checked {
+            background-color: #444;
+        }
+        
+        .ascii-toggle input[type="checkbox"]:checked::before {
+            transform: translateX(20px);
+            background-color: #d0d0d0;
+        }
+        
         /* ASCII art title */
         .ascii-title {
             font-family: monospace;
@@ -223,6 +274,10 @@
         <div class="controls">
             <button id="start-button">Start Game</button>
             <button id="pause-button">Pause</button>
+            <div class="ascii-toggle">
+                <label for="ascii-toggle-checkbox">ASCII Mode:</label>
+                <input type="checkbox" id="ascii-toggle-checkbox" checked>
+            </div>
         </div>
         
         <button id="jump-button" class="jump-button">JUMP (Space)</button>
@@ -237,6 +292,7 @@
                 <li>Space: Jump</li>
                 <li>Click/Tap: Jump</li>
                 <li>P: Pause/Resume</li>
+                <li>A: Toggle ASCII Mode</li>
             </ul>
         </div>
         
@@ -265,6 +321,7 @@
         const highScoreElement = document.getElementById('high-score');
         const gameOverMessage = document.getElementById('game-over-message');
         const webglErrorElement = document.getElementById('webgl-error');
+        const asciiToggleCheckbox = document.getElementById('ascii-toggle-checkbox');
         
         // Game state
         let score = 0;
@@ -653,8 +710,33 @@
                             event.preventDefault();
                             togglePause();
                             break;
+                        case 'a': // A key for ASCII toggle
+                        case 'A':
+                            event.preventDefault();
+                            asciiToggleCheckbox.checked = !asciiToggleCheckbox.checked;
+                            toggleAsciiRendering();
+                            break;
                     }
                 });
+                
+                // ASCII toggle event listener
+                asciiToggleCheckbox.addEventListener('change', toggleAsciiRendering);
+                
+                // Function to toggle ASCII rendering
+                function toggleAsciiRendering() {
+                    if (!zigModule || typeof zigModule.setUseAscii !== 'function') return;
+                    
+                    const useAscii = asciiToggleCheckbox.checked;
+                    zigModule.setUseAscii(useAscii);
+                    
+                    statusElement.textContent = useAscii ? 
+                        "ASCII rendering enabled" : 
+                        "ASCII rendering disabled";
+                    
+                    addLogEntry(useAscii ? 
+                        "Switched to ASCII rendering mode" : 
+                        "Switched to normal rendering mode");
+                }
                 
                 // Touch events for mobile
                 jumpButton.addEventListener('touchstart', (event) => {
