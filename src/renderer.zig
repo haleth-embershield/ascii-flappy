@@ -899,12 +899,17 @@ pub fn renderToAscii(
         return error.InvalidImageDimensions;
     }
 
+    // Validate image data
+    if (img.data.len < img.width * img.height * img.channels) {
+        return error.InvalidImageData;
+    }
+
     // Use the global preallocated buffer if available and correctly sized
     var output_buffer: []u8 = undefined;
     var using_global_buffer = false;
 
     if (global_ascii_buffer) |buffer| {
-        if (buffer.len == img.width * img.height * img.channels) {
+        if (buffer.len >= img.width * img.height * img.channels) {
             output_buffer = buffer;
             using_global_buffer = true;
         } else {
@@ -916,24 +921,161 @@ pub fn renderToAscii(
         output_buffer = try allocator.alloc(u8, img.width * img.height * img.channels);
     }
 
-    // Detect edges if needed
-    const edge_result = try detectEdges(allocator, img, params.detect_edges, params.sigma1, params.sigma2);
-    defer if (edge_result) |er| {
-        allocator.free(er.grayscale);
-        allocator.free(er.magnitude);
-        allocator.free(er.direction);
-    };
+    // Initialize output buffer to zero
+    @memset(output_buffer, 0);
 
-    // Generate ASCII art
-    const result = try generateAsciiArt(allocator, img, edge_result, params);
+    // Calculate output dimensions based on block size
+    const out_w = @max((img.width / params.block_size) * params.block_size, 1);
+    const out_h = @max((img.height / params.block_size) * params.block_size, 1);
 
-    // If we're using the global buffer, we need to copy the result into it
+    // Define colors
+    const background_color = if (params.bg_color != null) params.bg_color.? else [3]u8{ 21, 9, 27 }; // Dark purple
+    const text_color = if (params.fg_color != null) params.fg_color.? else [3]u8{ 211, 106, 111 }; // Light red
+
+    // Process pixels in a single pass with minimal branching
+    var y: usize = 0;
+    while (y < out_h) : (y += params.block_size) {
+        var x: usize = 0;
+        while (x < out_w) : (x += params.block_size) {
+            // Calculate block boundaries with bounds checking
+            const max_y = @min(y + params.block_size, out_h);
+            const max_x = @min(x + params.block_size, out_w);
+
+            // Calculate block info
+            var sum_brightness: u64 = 0;
+            var sum_color = [3]u64{ 0, 0, 0 };
+            var pixel_count: u64 = 0;
+
+            // Process each pixel in the block
+            var by: usize = y;
+            while (by < max_y) : (by += 1) {
+                var bx: usize = x;
+                while (bx < max_x) : (bx += 1) {
+                    // Bounds check for input image
+                    if (bx >= img.width or by >= img.height) {
+                        continue;
+                    }
+
+                    const pixel_index = (by * img.width + bx) * img.channels;
+
+                    // Bounds check for pixel data
+                    if (pixel_index + 2 >= img.data.len) {
+                        continue;
+                    }
+
+                    const r = img.data[pixel_index];
+                    const g = img.data[pixel_index + 1];
+                    const b = img.data[pixel_index + 2];
+
+                    // Calculate grayscale value
+                    const gray: u64 = @intFromFloat(@as(f32, @floatFromInt(r)) * 0.3 +
+                        @as(f32, @floatFromInt(g)) * 0.59 +
+                        @as(f32, @floatFromInt(b)) * 0.11);
+
+                    sum_brightness += gray;
+
+                    if (params.color) {
+                        sum_color[0] += r;
+                        sum_color[1] += g;
+                        sum_color[2] += b;
+                    }
+
+                    pixel_count += 1;
+                }
+            }
+
+            // Skip empty blocks
+            if (pixel_count == 0) {
+                continue;
+            }
+
+            // Calculate average brightness and select ASCII character
+            const avg_brightness: usize = @intCast(sum_brightness / pixel_count);
+            const boosted_brightness: usize = @intFromFloat(@as(f32, @floatFromInt(avg_brightness)) * params.brightness_boost);
+            const clamped_brightness = std.math.clamp(boosted_brightness, 0, 255);
+
+            // Select ASCII character
+            const char_index = (clamped_brightness * params.ascii_chars.len) / 256;
+            const selected_char = params.ascii_info[@min(char_index, params.ascii_info.len - 1)];
+            const ascii_char = params.ascii_chars[selected_char.start .. selected_char.start + selected_char.len];
+
+            // Calculate average color
+            var avg_color = [3]u8{ 255, 255, 255 };
+            if (params.color) {
+                avg_color = [3]u8{
+                    @intCast(sum_color[0] / pixel_count),
+                    @intCast(sum_color[1] / pixel_count),
+                    @intCast(sum_color[2] / pixel_count),
+                };
+
+                if (params.invert_color) {
+                    avg_color[0] = 255 - avg_color[0];
+                    avg_color[1] = 255 - avg_color[1];
+                    avg_color[2] = 255 - avg_color[2];
+                }
+            }
+
+            // Get bitmap for the character
+            const bm = &(try bitmap.getCharBitmap(ascii_char));
+
+            // Render the character to the output buffer
+            var dy: usize = 0;
+            while (dy < max_y - y) : (dy += 1) {
+                var dx: usize = 0;
+                while (dx < max_x - x) : (dx += 1) {
+                    const out_x = x + dx;
+                    const out_y = y + dy;
+
+                    // Bounds check for output buffer
+                    if (out_x >= out_w or out_y >= out_h) {
+                        continue;
+                    }
+
+                    const out_idx = (out_y * out_w + out_x) * 3;
+
+                    // Bounds check for output buffer
+                    if (out_idx + 2 >= output_buffer.len) {
+                        continue;
+                    }
+
+                    // Check if this pixel is part of the character
+                    const shift: u3 = @intCast(7 - @min(dx, 7));
+                    const bit: u8 = @as(u8, 1) << shift;
+
+                    if (dy < 8 and (bm[dy] & bit) != 0) {
+                        // Character pixel: use color
+                        if (params.color) {
+                            output_buffer[out_idx] = avg_color[0];
+                            output_buffer[out_idx + 1] = avg_color[1];
+                            output_buffer[out_idx + 2] = avg_color[2];
+                        } else {
+                            output_buffer[out_idx] = text_color[0];
+                            output_buffer[out_idx + 1] = text_color[1];
+                            output_buffer[out_idx + 2] = text_color[2];
+                        }
+                    } else {
+                        // Not a character pixel: use background
+                        if (params.color) {
+                            output_buffer[out_idx] = 0;
+                            output_buffer[out_idx + 1] = 0;
+                            output_buffer[out_idx + 2] = 0;
+                        } else {
+                            output_buffer[out_idx] = background_color[0];
+                            output_buffer[out_idx + 1] = background_color[1];
+                            output_buffer[out_idx + 2] = background_color[2];
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // If we're using the global buffer, return it directly
     if (using_global_buffer) {
-        @memcpy(output_buffer, result);
-        allocator.free(result);
         return output_buffer;
     } else {
-        return result;
+        // Otherwise, return the newly allocated buffer
+        return output_buffer;
     }
 }
 
