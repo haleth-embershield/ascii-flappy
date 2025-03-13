@@ -333,10 +333,13 @@
         
         // Initialize WebGL
         function initializeWebGL() {
-            if (window.AsciiFlappyWebGL.init(canvas)) {
-                addLogEntry("WebGL initialized successfully");
-                return true;
-            } else {
+            // Get the canvas element
+            const canvas = document.getElementById('canvas');
+            
+            // Initialize WebGL
+            const webglContext = window.AsciiFlappyWebGL.init('canvas');
+            if (!webglContext) {
+                console.error('Failed to initialize WebGL');
                 addLogEntry("WebGL initialization failed");
                 statusElement.textContent = "Error: WebGL initialization failed";
                 webglErrorElement.style.display = 'block';
@@ -346,6 +349,20 @@
                 jumpButton.disabled = true;
                 return false;
             }
+            
+            // Store WebGL context and texture globally
+            gl = webglContext.gl;
+            texture = webglContext.texture;
+            
+            // Set up viewport
+            gl.viewport(0, 0, canvas.width, canvas.height);
+            
+            // Clear the canvas
+            gl.clearColor(0.0, 0.0, 0.0, 1.0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            
+            addLogEntry("WebGL initialized successfully");
+            return true;
         }
         
         // Define imports globally so it can be accessed from all functions
@@ -389,6 +406,54 @@
                 },
                 clearCanvas: () => {
                     // WebGL clearing is handled in the render function
+                },
+                // WebGL function bindings
+                glTexImage2D: (target, level, internalformat, width, height, border, format, type, pixels) => {
+                    // Make sure gl is initialized
+                    if (!gl) return;
+                    
+                    // Get the data from WASM memory
+                    const buffer = new Uint8Array(zigModule.memory.buffer);
+                    const frameData = buffer.subarray(pixels, pixels + width * height * 3);
+                    
+                    // Map Zig WebGL constants to JavaScript WebGL constants
+                    const targetMap = {
+                        [window.AsciiFlappyWebGL.GL_TEXTURE_2D]: gl.TEXTURE_2D // GL_TEXTURE_2D
+                    };
+                    
+                    const formatMap = {
+                        [window.AsciiFlappyWebGL.GL_RGB]: gl.RGB // GL_RGB
+                    };
+                    
+                    const typeMap = {
+                        [window.AsciiFlappyWebGL.GL_UNSIGNED_BYTE]: gl.UNSIGNED_BYTE // GL_UNSIGNED_BYTE
+                    };
+                    
+                    // Upload texture data
+                    gl.bindTexture(gl.TEXTURE_2D, texture);
+                    gl.texImage2D(
+                        targetMap[target] || target,
+                        level,
+                        formatMap[internalformat] || internalformat,
+                        width,
+                        height,
+                        border,
+                        formatMap[format] || format,
+                        typeMap[type] || type,
+                        frameData
+                    );
+                },
+                glDrawArrays: (mode, first, count) => {
+                    // Make sure gl is initialized
+                    if (!gl) return;
+                    
+                    // Map Zig WebGL constants to JavaScript WebGL constants
+                    const modeMap = {
+                        [window.AsciiFlappyWebGL.GL_TRIANGLE_STRIP]: gl.TRIANGLE_STRIP // GL_TRIANGLE_STRIP
+                    };
+                    
+                    // Draw the quad
+                    gl.drawArrays(modeMap[mode] || mode, first, count);
                 },
                 // Audio functions
                 playJumpSound: () => {
@@ -538,11 +603,6 @@
             try {
                 statusElement.textContent = "Loading audio and WASM module...";
                 
-                // Check WebGL support first
-                if (!checkWebGLSupport()) {
-                    return; // Stop initialization if WebGL is not supported
-                }
-                
                 // Initialize WebGL
                 if (!initializeWebGL()) {
                     return; // Stop initialization if WebGL initialization fails
@@ -623,6 +683,13 @@
         
         // Initialize the application
         window.addEventListener('load', () => {
+            // Check WebGL support first
+            if (!checkWebGLSupport()) {
+                statusElement.textContent = "Error: WebGL is not supported by your browser";
+                return; // Stop initialization if WebGL is not supported
+            }
+            
+            // Continue with WASM initialization
             initWasm();
         });
         

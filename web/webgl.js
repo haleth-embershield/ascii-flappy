@@ -7,93 +7,106 @@ let program = null;
 let positionBuffer = null;
 let texture = null;
 
-// Check if WebGL is supported
+// Check if WebGL is supported by the browser
 function isWebGLSupported() {
     const canvas = document.createElement('canvas');
     return !!(window.WebGLRenderingContext && 
         (canvas.getContext('webgl') || canvas.getContext('experimental-webgl')));
 }
 
-// Initialize WebGL
-function initWebGL(canvas) {
-    // Try to get WebGL context
-    gl = canvas.getContext('webgl');
-    if (!gl) {
-        console.error('WebGL not supported or disabled');
-        return false;
+// Initialize WebGL context and resources
+function initWebGL(canvasId) {
+    const canvas = document.getElementById(canvasId);
+    if (!canvas) {
+        console.error('Canvas element not found');
+        return null;
     }
-
-    // Create shader program
-    const vertexShader = createShader(gl, gl.VERTEX_SHADER, `
-        attribute vec4 a_position;
-        attribute vec2 a_texcoord;
-        varying vec2 v_texcoord;
-        void main() {
-            gl_Position = a_position;
-            v_texcoord = a_texcoord;
-        }
-    `);
-
-    const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, `
-        precision mediump float;
-        uniform sampler2D u_texture;
-        varying vec2 v_texcoord;
-        void main() {
-            gl_FragColor = texture2D(u_texture, v_texcoord);
-        }
-    `);
-
-    // Create program
-    program = createProgram(gl, vertexShader, fragmentShader);
-    if (!program) {
-        return false;
-    }
-
-    // Look up attribute locations
-    const positionLocation = gl.getAttribLocation(program, 'a_position');
-    const texcoordLocation = gl.getAttribLocation(program, 'a_texcoord');
-
-    // Create position buffer (full-screen quad)
-    positionBuffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-        // positions    // texture coordinates
-        -1, -1,         0, 0,
-        -1,  1,         0, 1,
-         1, -1,         1, 0,
-         1,  1,         1, 1,
-    ]), gl.STATIC_DRAW);
-
-    // Create texture
-    texture = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, texture);
     
-    // Set texture parameters
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-
-    // Set up vertex attributes
-    gl.enableVertexAttribArray(positionLocation);
-    gl.enableVertexAttribArray(texcoordLocation);
-    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
-    gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 16, 0);
-    gl.vertexAttribPointer(texcoordLocation, 2, gl.FLOAT, false, 16, 8);
-
-    return true;
+    // Get WebGL context
+    gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+    if (!gl) {
+        console.error('WebGL not supported');
+        return null;
+    }
+    
+    // Create shader program
+    program = createShaderProgram(gl);
+    if (!program) {
+        console.error('Failed to create shader program');
+        return null;
+    }
+    
+    // Set up buffers and textures
+    setupBuffers(gl);
+    texture = setupTexture(gl);
+    
+    // Use the shader program
+    gl.useProgram(program);
+    
+    // Set up viewport
+    gl.viewport(0, 0, canvas.width, canvas.height);
+    
+    // Clear the canvas
+    gl.clearColor(0.0, 0.0, 0.0, 1.0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    
+    return {
+        gl: gl,
+        program: program,
+        texture: texture
+    };
 }
 
-// Create shader from source
+// Create shader program
+function createShaderProgram(gl) {
+    // Vertex shader source
+    const vsSource = `
+        attribute vec4 aVertexPosition;
+        attribute vec2 aTextureCoord;
+        varying highp vec2 vTextureCoord;
+        void main(void) {
+            gl_Position = aVertexPosition;
+            vTextureCoord = aTextureCoord;
+        }
+    `;
+    
+    // Fragment shader source
+    const fsSource = `
+        varying highp vec2 vTextureCoord;
+        uniform sampler2D uSampler;
+        void main(void) {
+            gl_FragColor = texture2D(uSampler, vTextureCoord);
+        }
+    `;
+    
+    // Create shaders
+    const vertexShader = createShader(gl, gl.VERTEX_SHADER, vsSource);
+    const fragmentShader = createShader(gl, gl.FRAGMENT_SHADER, fsSource);
+    
+    // Create program
+    const program = gl.createProgram();
+    gl.attachShader(program, vertexShader);
+    gl.attachShader(program, fragmentShader);
+    gl.linkProgram(program);
+    
+    // Check if program linked successfully
+    if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        console.error('Unable to initialize the shader program: ' + gl.getProgramInfoLog(program));
+        return null;
+    }
+    
+    return program;
+}
+
+// Create shader
 function createShader(gl, type, source) {
     const shader = gl.createShader(type);
     gl.shaderSource(shader, source);
     gl.compileShader(shader);
     
-    // Check if compilation was successful
-    const success = gl.getShaderParameter(shader, gl.COMPILE_STATUS);
-    if (!success) {
-        console.error('Could not compile shader:', gl.getShaderInfoLog(shader));
+    // Check if shader compiled successfully
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+        console.error('An error occurred compiling the shaders: ' + gl.getShaderInfoLog(shader));
         gl.deleteShader(shader);
         return null;
     }
@@ -101,22 +114,71 @@ function createShader(gl, type, source) {
     return shader;
 }
 
-// Create program from shaders
-function createProgram(gl, vertexShader, fragmentShader) {
-    const program = gl.createProgram();
-    gl.attachShader(program, vertexShader);
-    gl.attachShader(program, fragmentShader);
-    gl.linkProgram(program);
+// Set up vertex and texture coordinate buffers
+function setupBuffers(gl) {
+    // Create buffer for vertex positions
+    const positionBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
     
-    // Check if linking was successful
-    const success = gl.getProgramParameter(program, gl.LINK_STATUS);
-    if (!success) {
-        console.error('Could not link program:', gl.getProgramInfoLog(program));
-        gl.deleteProgram(program);
-        return null;
-    }
+    // Quad vertices (full screen)
+    const positions = [
+        -1.0,  1.0,
+         1.0,  1.0,
+        -1.0, -1.0,
+         1.0, -1.0,
+    ];
     
-    return program;
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+    
+    // Set up vertex attribute
+    const positionAttributeLocation = gl.getAttribLocation(program, 'aVertexPosition');
+    gl.enableVertexAttribArray(positionAttributeLocation);
+    gl.vertexAttribPointer(positionAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+    
+    // Create buffer for texture coordinates
+    const texCoordBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+    
+    // Texture coordinates
+    const textureCoordinates = [
+        0.0, 0.0,
+        1.0, 0.0,
+        0.0, 1.0,
+        1.0, 1.0,
+    ];
+    
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(textureCoordinates), gl.STATIC_DRAW);
+    
+    // Set up texture coordinate attribute
+    const texCoordAttributeLocation = gl.getAttribLocation(program, 'aTextureCoord');
+    gl.enableVertexAttribArray(texCoordAttributeLocation);
+    gl.vertexAttribPointer(texCoordAttributeLocation, 2, gl.FLOAT, false, 0, 0);
+}
+
+// Set up texture
+function setupTexture(gl) {
+    const texture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    
+    // Fill texture with a placeholder (1x1 black pixel)
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
+    
+    // Set texture parameters
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    
+    return texture;
+}
+
+// Render a frame
+function renderFrame(gl, texture) {
+    // Clear the canvas
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    
+    // Draw the quad
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 
 // Render ASCII frame using WebGL
@@ -154,9 +216,20 @@ function renderAsciiFrameWebGL(ptr, width, height, zigMemory) {
     return true;
 }
 
+// WebGL constants to match those in the Zig code
+const GL_TEXTURE_2D = 0x0DE1;
+const GL_RGB = 0x1907;
+const GL_UNSIGNED_BYTE = 0x1401;
+const GL_TRIANGLE_STRIP = 0x0005;
+
 // Export functions
 window.AsciiFlappyWebGL = {
     init: initWebGL,
     render: renderAsciiFrameWebGL,
-    isSupported: isWebGLSupported
+    isSupported: isWebGLSupported,
+    // Export constants
+    GL_TEXTURE_2D: GL_TEXTURE_2D,
+    GL_RGB: GL_RGB,
+    GL_UNSIGNED_BYTE: GL_UNSIGNED_BYTE,
+    GL_TRIANGLE_STRIP: GL_TRIANGLE_STRIP
 }; 
