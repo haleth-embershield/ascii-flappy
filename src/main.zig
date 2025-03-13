@@ -636,9 +636,6 @@ export fn setUseAscii(use_ascii: bool) void {
 
 // Change the ASCII character set
 export fn setCharacterSet(set_index: u32) void {
-    // Free the old character info
-    allocator.free(game.ascii_renderer.ascii_info);
-
     // Set the new character set based on the index
     const char_set = switch (set_index) {
         0 => renderer.DEFAULT_ASCII,
@@ -647,12 +644,16 @@ export fn setCharacterSet(set_index: u32) void {
         else => renderer.DEFAULT_ASCII,
     };
 
-    // Initialize the new character info
-    game.ascii_renderer.ascii_chars = char_set;
-    game.ascii_renderer.ascii_info = renderer.initAsciiChars(allocator, char_set) catch {
+    // Initialize the new character info first
+    const new_ascii_info = renderer.initAsciiChars(allocator, char_set) catch {
         logString("Failed to initialize character set");
         return;
     };
+
+    // Free the old character info only after successful initialization
+    allocator.free(game.ascii_renderer.ascii_info);
+    game.ascii_renderer.ascii_chars = char_set;
+    game.ascii_renderer.ascii_info = new_ascii_info;
 
     var msg_buf: [64]u8 = undefined;
     const msg = std.fmt.bufPrint(&msg_buf, "Character set changed to index: {d}", .{set_index}) catch "Character set changed";
