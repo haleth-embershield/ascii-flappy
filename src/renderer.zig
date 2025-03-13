@@ -22,6 +22,68 @@ pub const FULL_CHARACTERS = " .-:=+iltIcsv1x%7aejorzfnuCJT3*69LYpqy25SbdgFGOVXkP
 // TYPES AND CONSTANTS
 // -----------------------
 
+/// WebGL command types for batched rendering
+pub const WebGLCommand = enum(u32) {
+    UploadTexture = 1,
+    DrawArrays = 2,
+};
+
+/// Command buffer for batching WebGL operations
+pub const CommandBuffer = struct {
+    commands: []u32,
+    count: usize,
+    capacity: usize,
+
+    /// Initialize a new command buffer with the given capacity
+    pub fn init(allocator: std.mem.Allocator, capacity: usize) !CommandBuffer {
+        const commands = try allocator.alloc(u32, capacity * 4 + 1);
+        @memset(commands, 0);
+        return CommandBuffer{
+            .commands = commands,
+            .count = 0,
+            .capacity = capacity,
+        };
+    }
+
+    /// Free resources used by the command buffer
+    pub fn deinit(self: *CommandBuffer, allocator: std.mem.Allocator) void {
+        allocator.free(self.commands);
+        self.commands = &[_]u32{};
+        self.count = 0;
+        self.capacity = 0;
+    }
+
+    /// Reset the command buffer for reuse
+    pub fn reset(self: *CommandBuffer) void {
+        self.count = 0;
+    }
+
+    /// Add a texture upload command to the buffer
+    pub fn addTextureCommand(self: *CommandBuffer, data_ptr: [*]const u8) void {
+        if (self.count >= self.capacity) return;
+
+        const index = self.count * 4 + 1;
+        self.commands[index] = @intFromEnum(WebGLCommand.UploadTexture);
+        self.commands[index + 1] = @intFromPtr(data_ptr);
+        self.count += 1;
+    }
+
+    /// Add a draw command to the buffer
+    pub fn addDrawCommand(self: *CommandBuffer) void {
+        if (self.count >= self.capacity) return;
+
+        const index = self.count * 4 + 1;
+        self.commands[index] = @intFromEnum(WebGLCommand.DrawArrays);
+        self.count += 1;
+    }
+
+    /// Get a pointer to the command buffer for passing to WebGL
+    pub fn getBufferPtr(self: *CommandBuffer) [*]u32 {
+        self.commands[0] = @intCast(self.count);
+        return self.commands.ptr;
+    }
+};
+
 /// Preallocated buffer for ASCII output to avoid per-frame allocations
 var global_ascii_buffer: ?[]u8 = null;
 
@@ -129,9 +191,49 @@ extern fn glTexImage2D(target: u32, level: i32, internalformat: u32, width: i32,
 extern fn glDrawArrays(mode: u32, first: i32, count: i32) void;
 extern fn consoleLog(ptr: [*]const u8, len: usize) void;
 
-// -----------------------
-// CORE RENDERER FUNCTIONS
-// -----------------------
+/// New WebGL batched command execution function
+extern "env" fn executeBatchedCommands(cmd_ptr: [*]u32, width: u32, height: u32) void;
+
+/// Render a frame with WebGL support using batched commands
+/// This function creates a command buffer and executes it
+pub fn render_game_frame_batched(cmd_buffer: *CommandBuffer, ptr: [*]u8, width: usize, height: usize, channels: usize) void {
+    // Explicitly mark channels as used to avoid unused parameter warning
+    _ = channels;
+
+    // Reset the command buffer
+    cmd_buffer.reset();
+
+    // Add texture upload command
+    cmd_buffer.addTextureCommand(ptr);
+
+    // Add draw command
+    cmd_buffer.addDrawCommand();
+
+    // Execute the batched commands
+    executeBatchedCommands(cmd_buffer.getBufferPtr(), @intCast(width), @intCast(height));
+}
+
+/// Render a frame with WebGL support
+/// This public function uploads the texture to WebGL and handles rendering
+/// Legacy function kept for compatibility
+pub export fn render_game_frame(ptr: [*]u8, width: usize, height: usize, channels: usize) void {
+    // Explicitly mark channels as used to avoid unused parameter warning
+    _ = channels;
+
+    // Upload texture to WebGL
+    glTexImage2D(GL_TEXTURE_2D, 0, // level
+        GL_RGB, // internal format
+        @intCast(width), // width
+        @intCast(height), // height
+        0, // border
+        GL_RGB, // format
+        GL_UNSIGNED_BYTE, // type
+        ptr // data
+    );
+
+    // Draw the quad
+    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+}
 
 /// Initialize ASCII character information from a string of ASCII characters
 pub fn initAsciiChars(allocator: std.mem.Allocator, ascii_chars: []const u8) ![]AsciiCharInfo {
@@ -935,25 +1037,4 @@ pub fn renderGameFrame(
 
     // Convert to ASCII art
     return renderToAscii(allocator, frame, renderer);
-}
-
-/// Render a frame with WebGL support
-/// This public function uploads the texture to WebGL and handles rendering
-pub export fn render_game_frame(ptr: [*]u8, width: usize, height: usize, channels: usize) void {
-    // Explicitly mark channels as used to avoid unused parameter warning
-    _ = channels;
-
-    // Upload texture to WebGL
-    glTexImage2D(GL_TEXTURE_2D, 0, // level
-        GL_RGB, // internal format
-        @intCast(width), // width
-        @intCast(height), // height
-        0, // border
-        GL_RGB, // format
-        GL_UNSIGNED_BYTE, // type
-        ptr // data
-    );
-
-    // Draw the quad
-    glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
 }

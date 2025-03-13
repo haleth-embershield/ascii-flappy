@@ -113,6 +113,8 @@ const GameData = struct {
     ascii_renderer: renderer.RenderParams,
     game_image: renderer.Image,
     ascii_output: []u8,
+    // Command buffer for batched WebGL calls
+    command_buffer: renderer.CommandBuffer,
     // Performance optimization timers
     menu_render_timer: f32,
     pause_render_timer: f32,
@@ -129,6 +131,9 @@ const GameData = struct {
         // const ascii_output = try alloc.alloc(u8, PIXEL_WIDTH * PIXEL_HEIGHT * 3);
         const ascii_output = &[_]u8{};
 
+        // Initialize command buffer for batched WebGL calls
+        const command_buffer = try renderer.CommandBuffer.init(alloc, 10); // Capacity for 10 commands
+
         // Create a properly initialized game data structure
         var game_data = GameData{
             .state = GameState.Menu,
@@ -142,6 +147,7 @@ const GameData = struct {
             .ascii_renderer = ascii_renderer,
             .game_image = game_image,
             .ascii_output = ascii_output,
+            .command_buffer = command_buffer,
             .menu_render_timer = 0,
             .pause_render_timer = 0,
             .gameover_render_timer = 0,
@@ -215,6 +221,9 @@ const GameData = struct {
         // Free allocated resources
         self.ascii_renderer.deinit(alloc);
         renderer.destroyImage(alloc, self.game_image);
+
+        // Free command buffer
+        self.command_buffer.deinit(alloc);
 
         // We don't need to free ascii_output anymore as it points to the global buffer
         // which is freed separately in the main deinit function
@@ -568,11 +577,11 @@ fn drawGame() void {
             return;
         };
 
-        // Render ASCII output to WebGL
-        renderer.render_game_frame(game.ascii_output.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
+        // Render ASCII output to WebGL using batched commands
+        renderer.render_game_frame_batched(&game.command_buffer, game.ascii_output.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
     } else {
-        // Render the original game image directly to WebGL
-        renderer.render_game_frame(game.game_image.data.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
+        // Render the original game image directly to WebGL using batched commands
+        renderer.render_game_frame_batched(&game.command_buffer, game.game_image.data.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
     }
 }
 
@@ -598,11 +607,11 @@ fn drawMenu() void {
             return;
         };
 
-        // Render ASCII output to WebGL
-        renderer.render_game_frame(game.ascii_output.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
+        // Render ASCII output to WebGL using batched commands
+        renderer.render_game_frame_batched(&game.command_buffer, game.ascii_output.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
     } else {
-        // Render the original game image directly to WebGL
-        renderer.render_game_frame(game.game_image.data.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
+        // Render the original game image directly to WebGL using batched commands
+        renderer.render_game_frame_batched(&game.command_buffer, game.game_image.data.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
     }
 }
 

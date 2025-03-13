@@ -440,8 +440,7 @@
             const canvas = document.getElementById('canvas');
             
             // Initialize WebGL
-            const webglContext = window.AsciiFlappyWebGL.init('canvas');
-            if (!webglContext) {
+            if (!window.AsciiFlappyWebGL.init(canvas)) {
                 console.error('Failed to initialize WebGL');
                 addLogEntry("WebGL initialization failed");
                 statusElement.textContent = "Error: WebGL initialization failed";
@@ -452,17 +451,6 @@
                 jumpButton.disabled = true;
                 return false;
             }
-            
-            // Store WebGL context and texture globally
-            gl = webglContext.gl;
-            texture = webglContext.texture;
-            
-            // Set up viewport
-            gl.viewport(0, 0, canvas.width, canvas.height);
-            
-            // Clear the canvas
-            gl.clearColor(0.0, 0.0, 0.0, 1.0);
-            gl.clear(gl.COLOR_BUFFER_BIT);
             
             addLogEntry("WebGL initialized successfully");
             return true;
@@ -568,6 +556,9 @@
                 playFailSound: () => {
                     playSound('failure');
                 },
+                executeBatchedCommands: (cmdPtr, width, height) => {
+                    window.AsciiFlappyWebGL.executeBatch(cmdPtr, width, height, zigModule.memory);
+                }
             }
         };
         
