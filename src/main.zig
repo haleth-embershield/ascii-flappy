@@ -550,14 +550,20 @@ fn drawGame() void {
     // Note: We can't directly draw text with the ASCII renderer
     // We'll display the score in the HTML UI instead
 
-    // Render the game image to ASCII
-    game.ascii_output = renderer.renderToAscii(allocator, game.game_image, game.ascii_renderer) catch {
-        logString("Failed to render ASCII");
-        return;
-    };
+    // Check if ASCII rendering is enabled
+    if (game.ascii_renderer.use_ascii) {
+        // Render the game image to ASCII
+        game.ascii_output = renderer.renderToAscii(allocator, game.game_image, game.ascii_renderer) catch {
+            logString("Failed to render ASCII");
+            return;
+        };
 
-    // Render directly to WebGL
-    renderer.render_game_frame(game.ascii_output.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
+        // Render ASCII output to WebGL
+        renderer.render_game_frame(game.ascii_output.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
+    } else {
+        // Render the original game image directly to WebGL
+        renderer.render_game_frame(game.game_image.data.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
+    }
 }
 
 // Draw menu screen
@@ -574,14 +580,20 @@ fn drawMenu() void {
     // Draw a sample bird in the center
     renderer.drawCircle(game.game_image, PIXEL_WIDTH / 2, PIXEL_HEIGHT / 2, @intFromFloat(BIRD_SIZE / 2), .{ 255, 255, 0 });
 
-    // Render the menu image to ASCII
-    game.ascii_output = renderer.renderToAscii(allocator, game.game_image, game.ascii_renderer) catch {
-        logString("Failed to render ASCII menu");
-        return;
-    };
+    // Check if ASCII rendering is enabled
+    if (game.ascii_renderer.use_ascii) {
+        // Render the menu image to ASCII
+        game.ascii_output = renderer.renderToAscii(allocator, game.game_image, game.ascii_renderer) catch {
+            logString("Failed to render ASCII menu");
+            return;
+        };
 
-    // Render directly to WebGL
-    renderer.render_game_frame(game.ascii_output.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
+        // Render ASCII output to WebGL
+        renderer.render_game_frame(game.ascii_output.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
+    } else {
+        // Render the original game image directly to WebGL
+        renderer.render_game_frame(game.game_image.data.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
+    }
 }
 
 // Toggle pause state
