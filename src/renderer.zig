@@ -886,10 +886,6 @@ pub export fn render_game_frame(ptr: [*]u8, width: usize, height: usize, channel
         .channels = channels,
     };
 
-    // Debug log
-    const log_msg = "Rendering frame to WebGL";
-    consoleLog(log_msg.ptr, log_msg.len);
-
     // Create renderer parameters
     const ascii_chars = " .:-=+*#@%"; // Reordered to put more visible characters at the bright end
     const ascii_info = initAsciiChars(allocator, ascii_chars) catch {
@@ -924,10 +920,6 @@ pub export fn render_game_frame(ptr: [*]u8, width: usize, height: usize, channel
     };
     defer allocator.free(frame);
 
-    // Log successful rendering
-    const success_msg = "ASCII frame rendered successfully, uploading to WebGL";
-    consoleLog(success_msg.ptr, success_msg.len);
-
     // Upload texture to WebGL
     glTexImage2D(GL_TEXTURE_2D, 0, // level
         GL_RGB, // internal format
@@ -941,8 +933,4 @@ pub export fn render_game_frame(ptr: [*]u8, width: usize, height: usize, channel
 
     // Draw the quad
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
-
-    // Log completion
-    const complete_msg = "WebGL rendering complete";
-    consoleLog(complete_msg.ptr, complete_msg.len);
 }

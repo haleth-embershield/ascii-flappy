@@ -113,6 +113,10 @@ const GameData = struct {
     ascii_renderer: renderer.RenderParams,
     game_image: renderer.Image,
     ascii_output: []u8,
+    // Performance optimization timers
+    menu_render_timer: f32,
+    pause_render_timer: f32,
+    gameover_render_timer: f32,
 
     fn init(alloc: std.mem.Allocator) !GameData {
         // Initialize ASCII renderer
@@ -137,6 +141,9 @@ const GameData = struct {
             .ascii_renderer = ascii_renderer,
             .game_image = game_image,
             .ascii_output = ascii_output,
+            .menu_render_timer = 0,
+            .pause_render_timer = 0,
+            .gameover_render_timer = 0,
         };
 
         // Initialize all pipes as inactive
@@ -184,6 +191,11 @@ const GameData = struct {
         self.spawn_timer = 0;
         self.score = 0;
         self.state = GameState.Playing;
+
+        // Reset render timers
+        self.menu_render_timer = 0;
+        self.pause_render_timer = 0;
+        self.gameover_render_timer = 0;
     }
 
     fn addPipe(self: *GameData) void {
@@ -196,11 +208,6 @@ const GameData = struct {
 
         self.pipes[self.pipe_count] = Pipe.init(PIXEL_WIDTH, gap_y);
         self.pipe_count += 1;
-
-        // Debug log
-        var buf: [64]u8 = undefined;
-        const msg = std.fmt.bufPrint(&buf, "Pipe added: count={d}, x={d}, gap_y={d}", .{ self.pipe_count, PIXEL_WIDTH, gap_y }) catch "Pipe added";
-        logString(msg);
     }
 
     fn deinit(self: *GameData, alloc: std.mem.Allocator) void {
@@ -245,18 +252,39 @@ export fn resetGame() void {
 
 // Update animation frame
 export fn update(delta_time: f32) void {
+    // Cap delta time to prevent large jumps
+    const capped_delta = @min(delta_time, 0.05);
+
     if (game.state == GameState.Menu) {
-        drawMenu();
+        // Only redraw menu occasionally to save performance
+        game.menu_render_timer += capped_delta;
+        if (game.menu_render_timer >= 0.1) { // Redraw menu at 10 FPS
+            game.menu_render_timer = 0;
+            drawMenu();
+        }
         return;
     }
 
     if (game.state == GameState.Playing) {
         // Update game logic only when playing
-        updateGame(delta_time);
+        updateGame(capped_delta);
+        // Always draw the game for Playing state
+        drawGame();
+    } else if (game.state == GameState.GameOver) {
+        // For game over, only redraw occasionally
+        game.gameover_render_timer += capped_delta;
+        if (game.gameover_render_timer >= 0.2) { // Redraw at 5 FPS
+            game.gameover_render_timer = 0;
+            drawGame();
+        }
+    } else if (game.state == GameState.Paused) {
+        // For paused state, only redraw occasionally
+        game.pause_render_timer += capped_delta;
+        if (game.pause_render_timer >= 0.5) { // Redraw at 2 FPS
+            game.pause_render_timer = 0;
+            drawGame();
+        }
     }
-
-    // Always draw the game for Playing, Paused, and GameOver states
-    drawGame();
 }
 
 // Handle jump (spacebar or click)
@@ -264,6 +292,10 @@ export fn handleJump() void {
     if (game.state == GameState.Menu) {
         // Start game if in menu
         game.state = GameState.Playing;
+        // Reset render timers
+        game.menu_render_timer = 0;
+        game.pause_render_timer = 0;
+        game.gameover_render_timer = 0;
         // Ensure bird is in a safe position when starting
         game.bird = Bird.init(PIXEL_WIDTH / 4, PIXEL_HEIGHT / 2);
         return;
@@ -272,11 +304,15 @@ export fn handleJump() void {
     if (game.state == GameState.Paused) {
         // Resume game if paused
         game.state = GameState.Playing;
+        // Reset render timers
+        game.pause_render_timer = 0;
         return;
     }
 
     if (game.state == GameState.GameOver) {
         // Reset game if game over
+        // Reset render timers
+        game.gameover_render_timer = 0;
         resetGame();
         return;
     }
@@ -412,11 +448,6 @@ fn drawGame() void {
         // Skip pipes that are completely off-screen
         if (pipe.x + PIPE_WIDTH < 0) continue;
 
-        // Debug log pipe position
-        var buf: [64]u8 = undefined;
-        const msg = std.fmt.bufPrint(&buf, "Drawing pipe: x={d}, gap_y={d}", .{ pipe.x, pipe.gap_y }) catch "Drawing pipe";
-        logString(msg);
-
         // Draw pipe body
         const pipe_x: usize = @intFromFloat(@max(0, pipe.x));
         const pipe_width: usize = @intFromFloat(PIPE_WIDTH);
@@ -425,35 +456,50 @@ fn drawGame() void {
 
         // Top pipe - use a much brighter green for better visibility in ASCII
         if (gap_y > gap_half) {
-            // Draw a black border around the pipe first
-            renderer.drawRect(game.game_image, pipe_x - 2, 0, pipe_width + 4, gap_y - gap_half, .{ 0, 0, 0 });
+            // Draw a black border around the pipe first - with safe bounds checking
+            const border_x = if (pipe_x >= 2) pipe_x - 2 else 0;
+            const border_width = pipe_width + 4;
+            renderer.drawRect(game.game_image, border_x, 0, border_width, gap_y - gap_half, .{ 0, 0, 0 });
             // Then draw the pipe itself
             renderer.drawRect(game.game_image, pipe_x, 0, pipe_width, gap_y - gap_half, .{ 0, 255, 0 });
 
             // Draw top pipe cap with even brighter color
             const cap_width = pipe_width + 20; // Wider cap for better visibility
-            const cap_x = if (pipe_x > 10) pipe_x - 10 else 0;
-            // Draw a black border around the cap
-            renderer.drawRect(game.game_image, cap_x - 2, gap_y - gap_half - 17, cap_width + 4, 19, .{ 0, 0, 0 });
-            // Then draw the cap itself
-            renderer.drawRect(game.game_image, cap_x, gap_y - gap_half - 15, cap_width, 15, .{ 50, 255, 50 });
+            const cap_x = if (pipe_x >= 10) pipe_x - 10 else 0;
+            // Draw a black border around the cap - with safe bounds checking
+            const cap_border_x = if (cap_x >= 2) cap_x - 2 else 0;
+            const cap_border_width = cap_width + 4;
+            const cap_y_pos = if (gap_y > gap_half + 17) gap_y - gap_half - 17 else 0;
+            const cap_height = if (gap_y > gap_half + 17) 19 else gap_y - gap_half;
+            renderer.drawRect(game.game_image, cap_border_x, cap_y_pos, cap_border_width, cap_height, .{ 0, 0, 0 });
+            // Then draw the cap itself - with safe bounds checking
+            const cap_inner_y_pos = if (gap_y > gap_half + 15) gap_y - gap_half - 15 else 0;
+            const cap_inner_height = if (gap_y > gap_half + 15) 15 else gap_y - gap_half;
+            renderer.drawRect(game.game_image, cap_x, cap_inner_y_pos, cap_width, cap_inner_height, .{ 50, 255, 50 });
         }
 
         // Bottom pipe - use a much brighter green for better visibility in ASCII
         if (gap_y + gap_half < PIXEL_HEIGHT) {
-            // Draw a black border around the pipe first
-            renderer.drawRect(game.game_image, pipe_x - 2, gap_y + gap_half, pipe_width + 4, PIXEL_HEIGHT - (gap_y + gap_half), .{ 0, 0, 0 });
+            // Draw a black border around the pipe first - with safe bounds checking
+            const border_x = if (pipe_x >= 2) pipe_x - 2 else 0;
+            const border_width = pipe_width + 4;
+            renderer.drawRect(game.game_image, border_x, gap_y + gap_half, border_width, PIXEL_HEIGHT - (gap_y + gap_half), .{ 0, 0, 0 });
             // Then draw the pipe itself
             renderer.drawRect(game.game_image, pipe_x, gap_y + gap_half, pipe_width, PIXEL_HEIGHT - (gap_y + gap_half), .{ 0, 255, 0 });
 
             // Draw bottom pipe cap with even brighter color
             if (pipe_x > 10) {
                 const cap_width = pipe_width + 20; // Wider cap for better visibility
-                const cap_x = if (pipe_x > 10) pipe_x - 10 else 0;
-                // Draw a black border around the cap
-                renderer.drawRect(game.game_image, cap_x - 2, gap_y + gap_half, cap_width + 4, 19, .{ 0, 0, 0 });
+                const cap_x = if (pipe_x >= 10) pipe_x - 10 else 0;
+                // Draw a black border around the cap - with safe bounds checking
+                const cap_border_x = if (cap_x >= 2) cap_x - 2 else 0;
+                const cap_border_width = cap_width + 4;
+                // Make sure we don't exceed the image height
+                const cap_border_height = @min(19, PIXEL_HEIGHT - (gap_y + gap_half));
+                renderer.drawRect(game.game_image, cap_border_x, gap_y + gap_half, cap_border_width, cap_border_height, .{ 0, 0, 0 });
                 // Then draw the cap itself
-                renderer.drawRect(game.game_image, cap_x, gap_y + gap_half, cap_width, 15, .{ 50, 255, 50 });
+                const cap_height = @min(15, PIXEL_HEIGHT - (gap_y + gap_half));
+                renderer.drawRect(game.game_image, cap_x, gap_y + gap_half, cap_width, cap_height, .{ 50, 255, 50 });
             }
         }
     }
@@ -507,6 +553,8 @@ fn drawMenu() void {
 export fn togglePause() void {
     if (game.state == GameState.Playing) {
         game.state = GameState.Paused;
+        // Reset pause render timer
+        game.pause_render_timer = 0;
         logString("Game paused");
     } else if (game.state == GameState.Paused) {
         game.state = GameState.Playing;
