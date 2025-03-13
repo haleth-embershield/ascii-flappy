@@ -18,7 +18,7 @@ const BIRD_SIZE: f32 = 30.0;
 const PIPE_WIDTH: f32 = 120.0;
 const PIPE_GAP: f32 = 200.0;
 const PIPE_SPEED: f32 = 200.0;
-const PIPE_SPAWN_INTERVAL: f32 = 1.5;
+const PIPE_SPAWN_INTERVAL: f32 = 2;
 
 // ASCII rendering constants
 const ASCII_WIDTH: usize = 100; // Characters wide
