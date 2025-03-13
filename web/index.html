@@ -281,6 +281,71 @@
             font-size: 12px;
             text-align: center;
         }
+        .fps-counter {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            background-color: rgba(0, 0, 0, 0.5);
+            color: #fff;
+            padding: 5px 10px;
+            border-radius: 4px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            z-index: 100;
+        }
+        
+        /* Volume control styling */
+        .volume-control {
+            display: flex;
+            align-items: center;
+            margin-left: 10px;
+            background-color: #222;
+            padding: 5px 10px;
+            border-radius: 4px;
+            border: 1px solid #444;
+        }
+        
+        .volume-control label {
+            margin-right: 8px;
+            color: #c0c0c0;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .volume-control input[type="range"] {
+            -webkit-appearance: none;
+            width: 100px;
+            height: 6px;
+            background: #333;
+            border-radius: 3px;
+            outline: none;
+        }
+        
+        .volume-control input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #c0c0c0;
+            cursor: pointer;
+        }
+        
+        .volume-control input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #c0c0c0;
+            cursor: pointer;
+            border: none;
+        }
+        
+        .volume-control span {
+            margin-left: 8px;
+            color: #c0c0c0;
+            font-family: 'Courier New', monospace;
+            width: 40px;
+            text-align: right;
+        }
     </style>
 </head>
 <body>
@@ -297,6 +362,8 @@
         <div class="score-display">Score: <span id="score">0</span></div>
         <div class="high-score">High Score: <span id="high-score">0</span></div>
         <div class="game-over-message" id="game-over-message">GAME OVER - Press Space to restart</div>
+        
+        <div class="fps-counter">FPS: <span id="fps-counter">0</span></div>
         
         <canvas id="canvas" width="800" height="600"></canvas>
         
@@ -321,6 +388,11 @@
                     <option value="1">Block Characters</option>
                     <option value="2">Full Character Set</option>
                 </select>
+            </div>
+            <div class="volume-control">
+                <label for="volume-slider">Volume:</label>
+                <input type="range" id="volume-slider" min="0" max="100" value="70">
+                <span id="volume-value">70%</span>
             </div>
         </div>
         
@@ -368,14 +440,46 @@
         const webglErrorElement = document.getElementById('webgl-error');
         const asciiToggleCheckbox = document.getElementById('ascii-toggle-checkbox');
         const charSetSelect = document.getElementById('char-set-select');
+        const volumeSlider = document.getElementById('volume-slider');
+        const volumeValue = document.getElementById('volume-value');
+        const fpsCounter = document.getElementById('fps-counter');
         
         // Game state
         let score = 0;
         let highScore = 0;
+        let masterVolume = 0.7; // Default volume (70%)
         
-        // Audio system
+        // FPS tracking
+        let frameCount = 0;
+        let lastFpsUpdate = 0;
+        let currentFps = 0;
+        
+        // Update volume display and set master volume
+        volumeSlider.addEventListener('input', function() {
+            const volume = this.value;
+            volumeValue.textContent = volume + '%';
+            masterVolume = volume / 100;
+            
+            // Update audio context gain if available
+            if (gainNode) {
+                gainNode.gain.value = masterVolume;
+            }
+        });
+        
+        // Audio system with volume control
         const audioContext = new (window.AudioContext || window.webkitAudioContext)();
         const audioBuffers = {};
+        let gainNode = null;
+        
+        // Create gain node for volume control
+        try {
+            gainNode = audioContext.createGain();
+            gainNode.gain.value = masterVolume;
+            gainNode.connect(audioContext.destination);
+        } catch (e) {
+            console.error('Error creating gain node:', e);
+        }
+        
         const audioFiles = [
             { name: 'jump', path: 'audio/jump.ogg' },
             { name: 'explode', path: 'audio/explode.ogg' },
@@ -400,12 +504,19 @@
             }
         }
         
-        // Function to play sound from buffer
+        // Function to play sound from buffer with volume control
         function playSound(soundName) {
             if (audioBuffers[soundName]) {
                 const source = audioContext.createBufferSource();
                 source.buffer = audioBuffers[soundName];
-                source.connect(audioContext.destination);
+                
+                // Connect through gain node for volume control if available
+                if (gainNode) {
+                    source.connect(gainNode);
+                } else {
+                    source.connect(audioContext.destination);
+                }
+                
                 source.start(0);
             }
         }
@@ -568,6 +679,15 @@
             if (gameOverMessage.classList.contains('visible')) {
                 animationFrameId = null;
                 return;
+            }
+            
+            // FPS calculation
+            frameCount++;
+            if (timestamp - lastFpsUpdate >= 1000) { // Update every second
+                currentFps = Math.round((frameCount * 1000) / (timestamp - lastFpsUpdate));
+                fpsCounter.textContent = currentFps;
+                frameCount = 0;
+                lastFpsUpdate = timestamp;
             }
             
             // If paused, don't update game logic but still render the current frame
