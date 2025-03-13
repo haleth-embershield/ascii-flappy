@@ -873,8 +873,8 @@ pub fn renderGameFrame(
 }
 
 /// Render a frame with WebGL support
-/// This function uploads the texture to WebGL and handles rendering
-export fn render_game_frame(ptr: [*]u8, width: usize, height: usize, channels: usize) void {
+/// This public function uploads the texture to WebGL and handles rendering
+pub export fn render_game_frame(ptr: [*]u8, width: usize, height: usize, channels: usize) void {
     var allocator = std.heap.wasm_allocator;
 
     // Create image from input buffer
@@ -891,7 +891,8 @@ export fn render_game_frame(ptr: [*]u8, width: usize, height: usize, channels: u
         return;
     };
 
-    const params = RenderParams{
+    // Create mutable params so we can call deinit on it
+    var params = RenderParams{
         .ascii_chars = ascii_chars,
         .ascii_info = ascii_info,
         .color = true,
