@@ -22,6 +22,32 @@ pub const FULL_CHARACTERS = " .-:=+iltIcsv1x%7aejorzfnuCJT3*69LYpqy25SbdgFGOVXkP
 // TYPES AND CONSTANTS
 // -----------------------
 
+/// Preallocated buffer for ASCII output to avoid per-frame allocations
+var global_ascii_buffer: ?[]u8 = null;
+
+/// Preallocate a buffer for ASCII rendering to avoid per-frame allocations
+pub fn preallocateAsciiBuffer(allocator: std.mem.Allocator, width: usize, height: usize) !void {
+    // Free any existing buffer
+    if (global_ascii_buffer) |buffer| {
+        allocator.free(buffer);
+        global_ascii_buffer = null;
+    }
+
+    // Allocate a new buffer with appropriate size (3 bytes per pixel for RGB)
+    global_ascii_buffer = try allocator.alloc(u8, width * height * 3);
+
+    // Initialize buffer to zero
+    @memset(global_ascii_buffer.?, 0);
+}
+
+/// Free the global ASCII buffer
+pub fn freeAsciiBuffer(allocator: std.mem.Allocator) void {
+    if (global_ascii_buffer) |buffer| {
+        allocator.free(buffer);
+        global_ascii_buffer = null;
+    }
+}
+
 /// Represents an image in memory
 pub const Image = struct {
     data: []u8,
@@ -771,6 +797,23 @@ pub fn renderToAscii(
         return error.InvalidImageDimensions;
     }
 
+    // Use the global preallocated buffer if available and correctly sized
+    var output_buffer: []u8 = undefined;
+    var using_global_buffer = false;
+
+    if (global_ascii_buffer) |buffer| {
+        if (buffer.len == img.width * img.height * img.channels) {
+            output_buffer = buffer;
+            using_global_buffer = true;
+        } else {
+            // If buffer exists but wrong size, allocate a new one
+            output_buffer = try allocator.alloc(u8, img.width * img.height * img.channels);
+        }
+    } else {
+        // If no global buffer, allocate a new one
+        output_buffer = try allocator.alloc(u8, img.width * img.height * img.channels);
+    }
+
     // Detect edges if needed
     const edge_result = try detectEdges(allocator, img, params.detect_edges, params.sigma1, params.sigma2);
     defer if (edge_result) |er| {
@@ -780,7 +823,16 @@ pub fn renderToAscii(
     };
 
     // Generate ASCII art
-    return generateAsciiArt(allocator, img, edge_result, params);
+    const result = try generateAsciiArt(allocator, img, edge_result, params);
+
+    // If we're using the global buffer, we need to copy the result into it
+    if (using_global_buffer) {
+        @memcpy(output_buffer, result);
+        allocator.free(result);
+        return output_buffer;
+    } else {
+        return result;
+    }
 }
 
 /// Draw a pixel in an image (utility for game rendering)

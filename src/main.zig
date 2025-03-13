@@ -125,8 +125,9 @@ const GameData = struct {
         // Create game image buffer
         const game_image = try renderer.createImage(alloc, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
 
-        // Initialize with empty ASCII output
-        const ascii_output = try alloc.alloc(u8, PIXEL_WIDTH * PIXEL_HEIGHT * 3);
+        // Initialize with empty ASCII output - we'll use the preallocated buffer
+        // const ascii_output = try alloc.alloc(u8, PIXEL_WIDTH * PIXEL_HEIGHT * 3);
+        const ascii_output = &[_]u8{};
 
         // Create a properly initialized game data structure
         var game_data = GameData{
@@ -214,7 +215,10 @@ const GameData = struct {
         // Free allocated resources
         self.ascii_renderer.deinit(alloc);
         renderer.destroyImage(alloc, self.game_image);
-        alloc.free(self.ascii_output);
+
+        // We don't need to free ascii_output anymore as it points to the global buffer
+        // which is freed separately in the main deinit function
+        // alloc.free(self.ascii_output);
     }
 };
 
@@ -262,6 +266,12 @@ export fn init() void {
     game = GameData.init(allocator) catch {
         logString("Failed to initialize game");
         return;
+    };
+
+    // Preallocate ASCII buffer to prevent per-frame allocations
+    renderer.preallocateAsciiBuffer(allocator, PIXEL_WIDTH, PIXEL_HEIGHT) catch {
+        logString("Failed to preallocate ASCII buffer");
+        // Continue anyway, the renderer will fall back to per-frame allocations
     };
 
     // Ensure the bird starts in a safe position
@@ -552,7 +562,7 @@ fn drawGame() void {
 
     // Check if ASCII rendering is enabled
     if (game.ascii_renderer.use_ascii) {
-        // Render the game image to ASCII
+        // Render the game image to ASCII using the preallocated buffer
         game.ascii_output = renderer.renderToAscii(allocator, game.game_image, game.ascii_renderer) catch {
             logString("Failed to render ASCII");
             return;
@@ -582,7 +592,7 @@ fn drawMenu() void {
 
     // Check if ASCII rendering is enabled
     if (game.ascii_renderer.use_ascii) {
-        // Render the menu image to ASCII
+        // Render the menu image to ASCII using the preallocated buffer
         game.ascii_output = renderer.renderToAscii(allocator, game.game_image, game.ascii_renderer) catch {
             logString("Failed to render ASCII menu");
             return;
@@ -642,6 +652,10 @@ export fn setCharacterSet(set_index: u32) void {
 
 // Clean up resources when the module is unloaded
 export fn deinit() void {
+    // Free the preallocated ASCII buffer
+    renderer.freeAsciiBuffer(allocator);
+
+    // Clean up game resources
     game.deinit(allocator);
     logString("Game resources freed");
 }
