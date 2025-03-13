@@ -13,8 +13,13 @@ pub fn build(b: *std.Build) void {
     // Get native target for setup_zerver
     const native_target = b.standardTargetOptions(.{});
 
-    // Standard optimization options
-    const optimize = b.standardOptimizeOption(.{});
+    // Use ReleaseFast optimization by default for better WebAssembly performance
+    // This helps reduce warm-up jitter by generating pre-optimized Wasm code
+    const optimize = b.option(
+        std.builtin.OptimizeMode,
+        "optimize",
+        "Optimization mode (default: ReleaseFast)",
+    ) orelse .ReleaseFast;
 
     // Create an executable that compiles to WebAssembly
     const exe = b.addExecutable(.{

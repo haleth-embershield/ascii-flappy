@@ -7,7 +7,6 @@ const renderer = @import("renderer.zig");
 // WASM imports for browser interaction
 extern "env" fn consoleLog(ptr: [*]const u8, len: usize) void;
 extern "env" fn clearCanvas() void;
-extern "env" fn drawAsciiFrame(ptr: [*]const u8, width: usize, height: usize) void;
 extern "env" fn playJumpSound() void;
 extern "env" fn playExplodeSound() void;
 extern "env" fn playFailSound() void;
@@ -16,10 +15,10 @@ extern "env" fn playFailSound() void;
 const GRAVITY: f32 = 1000.0;
 const JUMP_VELOCITY: f32 = -400.0;
 const BIRD_SIZE: f32 = 30.0;
-const PIPE_WIDTH: f32 = 80.0;
+const PIPE_WIDTH: f32 = 120.0;
 const PIPE_GAP: f32 = 200.0;
 const PIPE_SPEED: f32 = 200.0;
-const PIPE_SPAWN_INTERVAL: f32 = 1.5;
+const PIPE_SPAWN_INTERVAL: f32 = 2;
 
 // ASCII rendering constants
 const ASCII_WIDTH: usize = 100; // Characters wide
@@ -93,8 +92,8 @@ const Pipe = struct {
         // Move pipe to the left
         self.x -= PIPE_SPEED * delta_time;
 
-        // Deactivate if off screen
-        if (self.x < -PIPE_WIDTH) {
+        // Deactivate if completely off screen (including the cap width)
+        if (self.x < -(PIPE_WIDTH + 20)) {
             self.active = false;
         }
     }
@@ -114,6 +113,12 @@ const GameData = struct {
     ascii_renderer: renderer.RenderParams,
     game_image: renderer.Image,
     ascii_output: []u8,
+    // Command buffer for batched WebGL calls
+    command_buffer: renderer.CommandBuffer,
+    // Performance optimization timers
+    menu_render_timer: f32,
+    pause_render_timer: f32,
+    gameover_render_timer: f32,
 
     fn init(alloc: std.mem.Allocator) !GameData {
         // Initialize ASCII renderer
@@ -122,13 +127,18 @@ const GameData = struct {
         // Create game image buffer
         const game_image = try renderer.createImage(alloc, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
 
-        // Initialize with empty ASCII output
-        const ascii_output = try alloc.alloc(u8, PIXEL_WIDTH * PIXEL_HEIGHT * 3);
+        // Initialize with empty ASCII output - we'll use the preallocated buffer
+        // const ascii_output = try alloc.alloc(u8, PIXEL_WIDTH * PIXEL_HEIGHT * 3);
+        const ascii_output = &[_]u8{};
 
-        return GameData{
+        // Initialize command buffer for batched WebGL calls
+        const command_buffer = try renderer.CommandBuffer.init(alloc, 10); // Capacity for 10 commands
+
+        // Create a properly initialized game data structure
+        var game_data = GameData{
             .state = GameState.Menu,
             .bird = Bird.init(PIXEL_WIDTH / 4, PIXEL_HEIGHT / 2),
-            .pipes = undefined,
+            .pipes = undefined, // Will be initialized below
             .pipe_count = 0,
             .spawn_timer = 0,
             .score = 0,
@@ -137,7 +147,23 @@ const GameData = struct {
             .ascii_renderer = ascii_renderer,
             .game_image = game_image,
             .ascii_output = ascii_output,
+            .command_buffer = command_buffer,
+            .menu_render_timer = 0,
+            .pause_render_timer = 0,
+            .gameover_render_timer = 0,
         };
+
+        // Initialize all pipes as inactive
+        for (0..game_data.pipes.len) |i| {
+            game_data.pipes[i] = Pipe{
+                .x = 0,
+                .gap_y = 0,
+                .active = false,
+                .passed = false,
+            };
+        }
+
+        return game_data;
     }
 
     // Simple random number generator
@@ -172,6 +198,11 @@ const GameData = struct {
         self.spawn_timer = 0;
         self.score = 0;
         self.state = GameState.Playing;
+
+        // Reset render timers
+        self.menu_render_timer = 0;
+        self.pause_render_timer = 0;
+        self.gameover_render_timer = 0;
     }
 
     fn addPipe(self: *GameData) void {
@@ -190,13 +221,45 @@ const GameData = struct {
         // Free allocated resources
         self.ascii_renderer.deinit(alloc);
         renderer.destroyImage(alloc, self.game_image);
-        alloc.free(self.ascii_output);
+
+        // Free command buffer
+        self.command_buffer.deinit(alloc);
+
+        // We don't need to free ascii_output anymore as it points to the global buffer
+        // which is freed separately in the main deinit function
+        // alloc.free(self.ascii_output);
     }
 };
 
 // Global state
 var allocator: std.mem.Allocator = undefined;
 var game: GameData = undefined;
+
+// Export the renderer params for use in renderer.zig
+pub fn getRendererParams() renderer.RenderParams {
+    // Ensure game is initialized
+    if (@intFromPtr(&game) == 0) {
+        // Return a default configuration if game is not initialized
+        const default_chars = " .:-=+*#@%";
+        const default_info = renderer.initAsciiChars(std.heap.wasm_allocator, default_chars) catch unreachable;
+        return renderer.RenderParams{
+            .ascii_chars = default_chars,
+            .ascii_info = default_info,
+            .color = true,
+            .invert_color = false,
+            .block_size = 4,
+            .detect_edges = false,
+            .sigma1 = 0.5,
+            .sigma2 = 1.0,
+            .brightness_boost = 1.5,
+            .threshold_disabled = false,
+            .dither = .None,
+            .bg_color = null,
+            .fg_color = null,
+        };
+    }
+    return game.ascii_renderer;
+}
 
 // Helper to log strings to browser console
 fn logString(msg: []const u8) void {
@@ -214,6 +277,12 @@ export fn init() void {
         return;
     };
 
+    // Preallocate ASCII buffer to prevent per-frame allocations
+    renderer.preallocateAsciiBuffer(allocator, PIXEL_WIDTH, PIXEL_HEIGHT) catch {
+        logString("Failed to preallocate ASCII buffer");
+        // Continue anyway, the renderer will fall back to per-frame allocations
+    };
+
     // Ensure the bird starts in a safe position
     game.bird = Bird.init(PIXEL_WIDTH / 4, PIXEL_HEIGHT / 2);
 
@@ -228,18 +297,39 @@ export fn resetGame() void {
 
 // Update animation frame
 export fn update(delta_time: f32) void {
+    // Cap delta time to prevent large jumps
+    const capped_delta = @min(delta_time, 0.05);
+
     if (game.state == GameState.Menu) {
-        drawMenu();
+        // Only redraw menu occasionally to save performance
+        game.menu_render_timer += capped_delta;
+        if (game.menu_render_timer >= 0.1) { // Redraw menu at 10 FPS
+            game.menu_render_timer = 0;
+            drawMenu();
+        }
         return;
     }
 
     if (game.state == GameState.Playing) {
         // Update game logic only when playing
-        updateGame(delta_time);
+        updateGame(capped_delta);
+        // Always draw the game for Playing state
+        drawGame();
+    } else if (game.state == GameState.GameOver) {
+        // For game over, only redraw occasionally
+        game.gameover_render_timer += capped_delta;
+        if (game.gameover_render_timer >= 0.2) { // Redraw at 5 FPS
+            game.gameover_render_timer = 0;
+            drawGame();
+        }
+    } else if (game.state == GameState.Paused) {
+        // For paused state, only redraw occasionally
+        game.pause_render_timer += capped_delta;
+        if (game.pause_render_timer >= 0.5) { // Redraw at 2 FPS
+            game.pause_render_timer = 0;
+            drawGame();
+        }
     }
-
-    // Always draw the game for Playing, Paused, and GameOver states
-    drawGame();
 }
 
 // Handle jump (spacebar or click)
@@ -247,6 +337,10 @@ export fn handleJump() void {
     if (game.state == GameState.Menu) {
         // Start game if in menu
         game.state = GameState.Playing;
+        // Reset render timers
+        game.menu_render_timer = 0;
+        game.pause_render_timer = 0;
+        game.gameover_render_timer = 0;
         // Ensure bird is in a safe position when starting
         game.bird = Bird.init(PIXEL_WIDTH / 4, PIXEL_HEIGHT / 2);
         return;
@@ -255,11 +349,15 @@ export fn handleJump() void {
     if (game.state == GameState.Paused) {
         // Resume game if paused
         game.state = GameState.Playing;
+        // Reset render timers
+        game.pause_render_timer = 0;
         return;
     }
 
     if (game.state == GameState.GameOver) {
         // Reset game if game over
+        // Reset render timers
+        game.gameover_render_timer = 0;
         resetGame();
         return;
     }
@@ -334,12 +432,13 @@ fn checkCollision(bird: Bird, pipe: Pipe) bool {
     // Bird hitbox (simplified as a circle)
     const bird_radius = BIRD_SIZE / 2;
 
-    // Check if bird is within pipe's x-range
+    // Check if bird is within pipe's x-range (including caps)
+    const pipe_left = pipe.x - 10; // Account for cap extending to the left
+    const pipe_right = pipe.x + PIPE_WIDTH + 10; // Account for cap extending to the right
     const bird_right = bird.x + bird_radius;
     const bird_left = bird.x - bird_radius;
-    const pipe_right = pipe.x + PIPE_WIDTH;
 
-    const is_within_x_range = bird_right > pipe.x and bird_left < pipe_right;
+    const is_within_x_range = bird_right > pipe_left and bird_left < pipe_right;
 
     if (is_within_x_range) {
         // Check if bird is outside the gap
@@ -348,10 +447,15 @@ fn checkCollision(bird: Bird, pipe: Pipe) bool {
         const gap_top = pipe.gap_y - PIPE_GAP / 2;
         const gap_bottom = pipe.gap_y + PIPE_GAP / 2;
 
+        // Check for collision with pipe body
         const is_above_gap = bird_top < gap_top;
         const is_below_gap = bird_bottom > gap_bottom;
 
-        if (is_above_gap or is_below_gap) {
+        // Check for collision with pipe caps
+        const is_at_gap_edge_top = bird_bottom > gap_top - 15 and bird_top < gap_top;
+        const is_at_gap_edge_bottom = bird_top < gap_bottom + 15 and bird_bottom > gap_bottom;
+
+        if (is_above_gap or is_below_gap or (is_at_gap_edge_top and bird_right > pipe_left) or (is_at_gap_edge_bottom and bird_right > pipe_left)) {
             return true;
         }
     }
@@ -395,45 +499,61 @@ fn drawGame() void {
         // Skip pipes that are completely off-screen
         if (pipe.x + PIPE_WIDTH < 0) continue;
 
-        // Safe conversion of float coordinates to usize
-        const pipe_x: usize = if (pipe.x < 0) 0 else @intFromFloat(@max(0, pipe.x));
+        // Draw pipe body
+        const pipe_x: usize = @intFromFloat(@max(0, pipe.x));
         const pipe_width: usize = if (pipe.x < 0)
-            @intFromFloat(@max(0, PIPE_WIDTH + pipe.x)) // Adjust width if pipe is partially off-screen
+            @intFromFloat(@min(PIPE_WIDTH + pipe.x, PIPE_WIDTH)) // Adjust width for partially off-screen pipes
         else
             @intFromFloat(PIPE_WIDTH);
-
-        // Ensure gap_y is within bounds
-        const safe_gap_y = std.math.clamp(pipe.gap_y, PIPE_GAP / 2 + 10, PIXEL_HEIGHT - PIPE_GAP / 2 - 10);
-        const gap_y: usize = @intFromFloat(safe_gap_y);
+        const gap_y: usize = @intFromFloat(pipe.gap_y);
         const gap_half: usize = @intFromFloat(PIPE_GAP / 2);
 
-        // Calculate pipe cap position safely
-        const cap_offset: f32 = 5;
-        const cap_x: usize = if (pipe.x - cap_offset < 0) 0 else @intFromFloat(@max(0, pipe.x - cap_offset));
-        const cap_width: usize = if (pipe.x - cap_offset < 0)
-            pipe_width + @as(usize, @intFromFloat(@max(0, pipe.x))) // Adjust cap width if partially off-screen
-        else
-            pipe_width + @as(usize, @intFromFloat(cap_offset * 2));
+        // Top pipe - use a much brighter green for better visibility in ASCII
+        if (gap_y > gap_half) {
+            // Draw a black border around the pipe first - with safe bounds checking
+            const border_x = if (pipe_x >= 2) pipe_x - 2 else 0;
+            const border_width = pipe_width + 4;
+            renderer.drawRect(game.game_image, border_x, 0, border_width, gap_y - gap_half, .{ 0, 0, 0 });
+            // Then draw the pipe itself
+            renderer.drawRect(game.game_image, pipe_x, 0, pipe_width, gap_y - gap_half, .{ 0, 255, 0 });
 
-        // Ensure we don't try to draw with negative dimensions
-        if (gap_y > gap_half and pipe_width > 0) {
-            // Draw top pipe (only if there's space)
-            if (gap_y > gap_half) {
-                renderer.drawRect(game.game_image, pipe_x, 0, pipe_width, gap_y - gap_half, .{ 0, 128, 0 });
-            }
+            // Draw top pipe cap with even brighter color
+            const cap_width = @min(pipe_width + 20, PIXEL_WIDTH - pipe_x); // Wider cap for better visibility, but don't exceed screen width
+            const cap_x = if (pipe_x >= 10) pipe_x - 10 else 0;
+            // Draw a black border around the cap - with safe bounds checking
+            const cap_border_x = if (cap_x >= 2) cap_x - 2 else 0;
+            const cap_border_width = @min(cap_width + 4, PIXEL_WIDTH - cap_border_x);
+            const cap_y_pos = if (gap_y > gap_half + 17) gap_y - gap_half - 17 else 0;
+            const cap_height = if (gap_y > gap_half + 17) 19 else gap_y - gap_half;
+            renderer.drawRect(game.game_image, cap_border_x, cap_y_pos, cap_border_width, cap_height, .{ 0, 0, 0 });
+            // Then draw the cap itself - with safe bounds checking
+            const cap_inner_y_pos = if (gap_y > gap_half + 15) gap_y - gap_half - 15 else 0;
+            const cap_inner_height = if (gap_y > gap_half + 15) 15 else gap_y - gap_half;
+            renderer.drawRect(game.game_image, cap_x, cap_inner_y_pos, cap_width, cap_inner_height, .{ 50, 255, 50 });
+        }
 
-            // Draw pipe cap (only if there's space)
-            if (gap_y > gap_half + 10) {
-                renderer.drawRect(game.game_image, cap_x, gap_y - gap_half - 10, cap_width, 10, .{ 0, 100, 0 });
-            }
+        // Bottom pipe - use a much brighter green for better visibility in ASCII
+        if (gap_y + gap_half < PIXEL_HEIGHT) {
+            // Draw a black border around the pipe first - with safe bounds checking
+            const border_x = if (pipe_x >= 2) pipe_x - 2 else 0;
+            const border_width = pipe_width + 4;
+            renderer.drawRect(game.game_image, border_x, gap_y + gap_half, border_width, PIXEL_HEIGHT - (gap_y + gap_half), .{ 0, 0, 0 });
+            // Then draw the pipe itself
+            renderer.drawRect(game.game_image, pipe_x, gap_y + gap_half, pipe_width, PIXEL_HEIGHT - (gap_y + gap_half), .{ 0, 255, 0 });
 
-            // Draw bottom pipe
-            if (gap_y + gap_half < PIXEL_HEIGHT) {
-                const bottom_height = PIXEL_HEIGHT - (gap_y + gap_half);
-                renderer.drawRect(game.game_image, pipe_x, gap_y + gap_half, pipe_width, bottom_height, .{ 0, 128, 0 });
-
-                // Draw bottom pipe cap
-                renderer.drawRect(game.game_image, cap_x, gap_y + gap_half, cap_width, 10, .{ 0, 100, 0 });
+            // Draw bottom pipe cap with even brighter color
+            if (pipe_x > 10) {
+                const cap_width = @min(pipe_width + 20, PIXEL_WIDTH - pipe_x); // Wider cap for better visibility, but don't exceed screen width
+                const cap_x = if (pipe_x >= 10) pipe_x - 10 else 0;
+                // Draw a black border around the cap - with safe bounds checking
+                const cap_border_x = if (cap_x >= 2) cap_x - 2 else 0;
+                const cap_border_width = @min(cap_width + 4, PIXEL_WIDTH - cap_border_x);
+                // Make sure we don't exceed the image height
+                const cap_border_height = @min(19, PIXEL_HEIGHT - (gap_y + gap_half));
+                renderer.drawRect(game.game_image, cap_border_x, gap_y + gap_half, cap_border_width, cap_border_height, .{ 0, 0, 0 });
+                // Then draw the cap itself
+                const cap_height = @min(15, PIXEL_HEIGHT - (gap_y + gap_half));
+                renderer.drawRect(game.game_image, cap_x, gap_y + gap_half, cap_width, cap_height, .{ 50, 255, 50 });
             }
         }
     }
@@ -449,14 +569,20 @@ fn drawGame() void {
     // Note: We can't directly draw text with the ASCII renderer
     // We'll display the score in the HTML UI instead
 
-    // Render the game image to ASCII
-    game.ascii_output = renderer.renderToAscii(allocator, game.game_image, game.ascii_renderer) catch {
-        logString("Failed to render ASCII");
-        return;
-    };
+    // Check if ASCII rendering is enabled
+    if (game.ascii_renderer.use_ascii) {
+        // Render the game image to ASCII using the preallocated buffer
+        game.ascii_output = renderer.renderToAscii(allocator, game.game_image, game.ascii_renderer) catch {
+            logString("Failed to render ASCII");
+            return;
+        };
 
-    // Send the ASCII frame to JavaScript for display
-    drawAsciiFrame(game.ascii_output.ptr, PIXEL_WIDTH, PIXEL_HEIGHT);
+        // Render ASCII output to WebGL using batched commands
+        renderer.render_game_frame_batched(&game.command_buffer, game.ascii_output.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
+    } else {
+        // Render the original game image directly to WebGL using batched commands
+        renderer.render_game_frame_batched(&game.command_buffer, game.game_image.data.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
+    }
 }
 
 // Draw menu screen
@@ -473,20 +599,28 @@ fn drawMenu() void {
     // Draw a sample bird in the center
     renderer.drawCircle(game.game_image, PIXEL_WIDTH / 2, PIXEL_HEIGHT / 2, @intFromFloat(BIRD_SIZE / 2), .{ 255, 255, 0 });
 
-    // Render the menu image to ASCII
-    game.ascii_output = renderer.renderToAscii(allocator, game.game_image, game.ascii_renderer) catch {
-        logString("Failed to render ASCII menu");
-        return;
-    };
+    // Check if ASCII rendering is enabled
+    if (game.ascii_renderer.use_ascii) {
+        // Render the menu image to ASCII using the preallocated buffer
+        game.ascii_output = renderer.renderToAscii(allocator, game.game_image, game.ascii_renderer) catch {
+            logString("Failed to render ASCII menu");
+            return;
+        };
 
-    // Send the ASCII frame to JavaScript for display
-    drawAsciiFrame(game.ascii_output.ptr, PIXEL_WIDTH, PIXEL_HEIGHT);
+        // Render ASCII output to WebGL using batched commands
+        renderer.render_game_frame_batched(&game.command_buffer, game.ascii_output.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
+    } else {
+        // Render the original game image directly to WebGL using batched commands
+        renderer.render_game_frame_batched(&game.command_buffer, game.game_image.data.ptr, PIXEL_WIDTH, PIXEL_HEIGHT, 3);
+    }
 }
 
 // Toggle pause state
 export fn togglePause() void {
     if (game.state == GameState.Playing) {
         game.state = GameState.Paused;
+        // Reset pause render timer
+        game.pause_render_timer = 0;
         logString("Game paused");
     } else if (game.state == GameState.Paused) {
         game.state = GameState.Playing;
@@ -494,8 +628,44 @@ export fn togglePause() void {
     }
 }
 
+// Toggle ASCII rendering on/off
+export fn setUseAscii(use_ascii: bool) void {
+    game.ascii_renderer.use_ascii = use_ascii;
+    logString(if (use_ascii) "ASCII rendering enabled" else "ASCII rendering disabled");
+}
+
+// Change the ASCII character set
+export fn setCharacterSet(set_index: u32) void {
+    // Set the new character set based on the index
+    const char_set = switch (set_index) {
+        0 => renderer.DEFAULT_ASCII,
+        1 => renderer.DEFAULT_BLOCK,
+        2 => renderer.FULL_CHARACTERS,
+        else => renderer.DEFAULT_ASCII,
+    };
+
+    // Initialize the new character info first
+    const new_ascii_info = renderer.initAsciiChars(allocator, char_set) catch {
+        logString("Failed to initialize character set");
+        return;
+    };
+
+    // Free the old character info only after successful initialization
+    allocator.free(game.ascii_renderer.ascii_info);
+    game.ascii_renderer.ascii_chars = char_set;
+    game.ascii_renderer.ascii_info = new_ascii_info;
+
+    var msg_buf: [64]u8 = undefined;
+    const msg = std.fmt.bufPrint(&msg_buf, "Character set changed to index: {d}", .{set_index}) catch "Character set changed";
+    logString(msg);
+}
+
 // Clean up resources when the module is unloaded
 export fn deinit() void {
+    // Free the preallocated ASCII buffer
+    renderer.freeAsciiBuffer(allocator);
+
+    // Clean up game resources
     game.deinit(allocator);
     logString("Game resources freed");
 }
