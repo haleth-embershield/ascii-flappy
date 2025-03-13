@@ -15,7 +15,7 @@ extern "env" fn playFailSound() void;
 const GRAVITY: f32 = 1000.0;
 const JUMP_VELOCITY: f32 = -400.0;
 const BIRD_SIZE: f32 = 30.0;
-const PIPE_WIDTH: f32 = 80.0;
+const PIPE_WIDTH: f32 = 120.0;
 const PIPE_GAP: f32 = 200.0;
 const PIPE_SPEED: f32 = 200.0;
 const PIPE_SPAWN_INTERVAL: f32 = 1.5;
@@ -124,10 +124,11 @@ const GameData = struct {
         // Initialize with empty ASCII output
         const ascii_output = try alloc.alloc(u8, PIXEL_WIDTH * PIXEL_HEIGHT * 3);
 
-        return GameData{
+        // Create a properly initialized game data structure
+        var game_data = GameData{
             .state = GameState.Menu,
             .bird = Bird.init(PIXEL_WIDTH / 4, PIXEL_HEIGHT / 2),
-            .pipes = undefined,
+            .pipes = undefined, // Will be initialized below
             .pipe_count = 0,
             .spawn_timer = 0,
             .score = 0,
@@ -137,6 +138,18 @@ const GameData = struct {
             .game_image = game_image,
             .ascii_output = ascii_output,
         };
+
+        // Initialize all pipes as inactive
+        for (0..game_data.pipes.len) |i| {
+            game_data.pipes[i] = Pipe{
+                .x = 0,
+                .gap_y = 0,
+                .active = false,
+                .passed = false,
+            };
+        }
+
+        return game_data;
     }
 
     // Simple random number generator
@@ -183,6 +196,11 @@ const GameData = struct {
 
         self.pipes[self.pipe_count] = Pipe.init(PIXEL_WIDTH, gap_y);
         self.pipe_count += 1;
+
+        // Debug log
+        var buf: [64]u8 = undefined;
+        const msg = std.fmt.bufPrint(&buf, "Pipe added: count={d}, x={d}, gap_y={d}", .{ self.pipe_count, PIXEL_WIDTH, gap_y }) catch "Pipe added";
+        logString(msg);
     }
 
     fn deinit(self: *GameData, alloc: std.mem.Allocator) void {
@@ -394,31 +412,48 @@ fn drawGame() void {
         // Skip pipes that are completely off-screen
         if (pipe.x + PIPE_WIDTH < 0) continue;
 
+        // Debug log pipe position
+        var buf: [64]u8 = undefined;
+        const msg = std.fmt.bufPrint(&buf, "Drawing pipe: x={d}, gap_y={d}", .{ pipe.x, pipe.gap_y }) catch "Drawing pipe";
+        logString(msg);
+
         // Draw pipe body
         const pipe_x: usize = @intFromFloat(@max(0, pipe.x));
         const pipe_width: usize = @intFromFloat(PIPE_WIDTH);
         const gap_y: usize = @intFromFloat(pipe.gap_y);
         const gap_half: usize = @intFromFloat(PIPE_GAP / 2);
 
-        // Top pipe
+        // Top pipe - use a much brighter green for better visibility in ASCII
         if (gap_y > gap_half) {
-            renderer.drawRect(game.game_image, pipe_x, 0, pipe_width, gap_y - gap_half, .{ 0, 150, 0 });
+            // Draw a black border around the pipe first
+            renderer.drawRect(game.game_image, pipe_x - 2, 0, pipe_width + 4, gap_y - gap_half, .{ 0, 0, 0 });
+            // Then draw the pipe itself
+            renderer.drawRect(game.game_image, pipe_x, 0, pipe_width, gap_y - gap_half, .{ 0, 255, 0 });
 
-            // Draw top pipe cap
-            const cap_width = pipe_width + 10;
-            const cap_x = if (pipe_x > 5) pipe_x - 5 else 0;
-            renderer.drawRect(game.game_image, cap_x, gap_y - gap_half - 10, cap_width, 10, .{ 0, 100, 0 });
+            // Draw top pipe cap with even brighter color
+            const cap_width = pipe_width + 20; // Wider cap for better visibility
+            const cap_x = if (pipe_x > 10) pipe_x - 10 else 0;
+            // Draw a black border around the cap
+            renderer.drawRect(game.game_image, cap_x - 2, gap_y - gap_half - 17, cap_width + 4, 19, .{ 0, 0, 0 });
+            // Then draw the cap itself
+            renderer.drawRect(game.game_image, cap_x, gap_y - gap_half - 15, cap_width, 15, .{ 50, 255, 50 });
         }
 
-        // Bottom pipe
+        // Bottom pipe - use a much brighter green for better visibility in ASCII
         if (gap_y + gap_half < PIXEL_HEIGHT) {
-            renderer.drawRect(game.game_image, pipe_x, gap_y + gap_half, pipe_width, PIXEL_HEIGHT - (gap_y + gap_half), .{ 0, 150, 0 });
+            // Draw a black border around the pipe first
+            renderer.drawRect(game.game_image, pipe_x - 2, gap_y + gap_half, pipe_width + 4, PIXEL_HEIGHT - (gap_y + gap_half), .{ 0, 0, 0 });
+            // Then draw the pipe itself
+            renderer.drawRect(game.game_image, pipe_x, gap_y + gap_half, pipe_width, PIXEL_HEIGHT - (gap_y + gap_half), .{ 0, 255, 0 });
 
-            // Draw bottom pipe cap
-            if (pipe_x > 5) {
-                const cap_width = pipe_width + 10;
-                const cap_x = if (pipe_x > 5) pipe_x - 5 else 0;
-                renderer.drawRect(game.game_image, cap_x, gap_y + gap_half, cap_width, 10, .{ 0, 100, 0 });
+            // Draw bottom pipe cap with even brighter color
+            if (pipe_x > 10) {
+                const cap_width = pipe_width + 20; // Wider cap for better visibility
+                const cap_x = if (pipe_x > 10) pipe_x - 10 else 0;
+                // Draw a black border around the cap
+                renderer.drawRect(game.game_image, cap_x - 2, gap_y + gap_half, cap_width + 4, 19, .{ 0, 0, 0 });
+                // Then draw the cap itself
+                renderer.drawRect(game.game_image, cap_x, gap_y + gap_half, cap_width, 15, .{ 50, 255, 50 });
             }
         }
     }

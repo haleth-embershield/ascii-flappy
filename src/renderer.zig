@@ -90,6 +90,7 @@ const GL_TRIANGLE_STRIP: u32 = 0x0005;
 /// WebGL function bindings
 extern fn glTexImage2D(target: u32, level: i32, internalformat: u32, width: i32, height: i32, border: i32, format: u32, type: u32, pixels: [*]const u8) void;
 extern fn glDrawArrays(mode: u32, first: i32, count: i32) void;
+extern fn consoleLog(ptr: [*]const u8, len: usize) void;
 
 // -----------------------
 // CORE RENDERER FUNCTIONS
@@ -721,7 +722,7 @@ pub fn createRenderer(allocator: std.mem.Allocator) !RenderParams {
         .detect_edges = false,
         .sigma1 = 0.5,
         .sigma2 = 1.0,
-        .brightness_boost = 1.0,
+        .brightness_boost = 1.5,
         .threshold_disabled = false,
         .dither = .None,
         .bg_color = null,
@@ -885,9 +886,15 @@ pub export fn render_game_frame(ptr: [*]u8, width: usize, height: usize, channel
         .channels = channels,
     };
 
+    // Debug log
+    const log_msg = "Rendering frame to WebGL";
+    consoleLog(log_msg.ptr, log_msg.len);
+
     // Create renderer parameters
-    const ascii_chars = " .:-=+*%@#";
+    const ascii_chars = " .:-=+*#@%"; // Reordered to put more visible characters at the bright end
     const ascii_info = initAsciiChars(allocator, ascii_chars) catch {
+        const error_msg = "Failed to initialize ASCII characters";
+        consoleLog(error_msg.ptr, error_msg.len);
         return;
     };
 
@@ -901,7 +908,7 @@ pub export fn render_game_frame(ptr: [*]u8, width: usize, height: usize, channel
         .detect_edges = false,
         .sigma1 = 0.5,
         .sigma2 = 1.0,
-        .brightness_boost = 1.0,
+        .brightness_boost = 1.5, // Increase brightness boost to make bright colors more visible
         .threshold_disabled = false,
         .dither = .None,
         .bg_color = null,
@@ -911,9 +918,15 @@ pub export fn render_game_frame(ptr: [*]u8, width: usize, height: usize, channel
 
     // Render the ASCII frame
     const frame = renderToAscii(allocator, img, params) catch {
+        const error_msg = "Failed to render ASCII frame";
+        consoleLog(error_msg.ptr, error_msg.len);
         return;
     };
     defer allocator.free(frame);
+
+    // Log successful rendering
+    const success_msg = "ASCII frame rendered successfully, uploading to WebGL";
+    consoleLog(success_msg.ptr, success_msg.len);
 
     // Upload texture to WebGL
     glTexImage2D(GL_TEXTURE_2D, 0, // level
@@ -928,4 +941,8 @@ pub export fn render_game_frame(ptr: [*]u8, width: usize, height: usize, channel
 
     // Draw the quad
     glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+
+    // Log completion
+    const complete_msg = "WebGL rendering complete";
+    consoleLog(complete_msg.ptr, complete_msg.len);
 }
