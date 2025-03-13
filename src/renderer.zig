@@ -6,6 +6,15 @@ const std = @import("std");
 
 const bitmap = @import("bitmap.zig");
 
+// -----------------------
+// CHARACTER SETS
+// -----------------------
+
+/// Different character sets for ASCII rendering
+pub const DEFAULT_ASCII = " .:-=+*%@#";
+pub const DEFAULT_BLOCK = " .:coPO?@█";
+pub const FULL_CHARACTERS = " .-:=+iltIcsv1x%7aejorzfnuCJT3*69LYpqy25SbdgFGOVXkPhmw48AQDEHKUZR@B#NW0M";
+
 /// A simplified ASCII renderer targeting WebAssembly for a Flappy Bird-like game
 /// Extracted and optimized from the original glyph project
 
@@ -712,7 +721,7 @@ pub fn resizeImage(allocator: std.mem.Allocator, img: Image, new_width: usize, n
 
 /// Create a new renderer configuration with default settings
 pub fn createRenderer(allocator: std.mem.Allocator) !RenderParams {
-    const ascii_chars = " .:-=+*%@#"; // Reordered for better visibility
+    const ascii_chars = DEFAULT_ASCII; // Use the constant instead of hardcoding
     const ascii_info = try initAsciiChars(allocator, ascii_chars);
 
     return RenderParams{

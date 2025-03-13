@@ -235,6 +235,42 @@
             background-color: #d0d0d0;
         }
         
+        /* Character set selector styling */
+        .char-set-selector {
+            display: flex;
+            align-items: center;
+            margin-left: 10px;
+            background-color: #222;
+            padding: 5px 10px;
+            border-radius: 4px;
+            border: 1px solid #444;
+        }
+        
+        .char-set-selector label {
+            margin-right: 8px;
+            color: #c0c0c0;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .char-set-selector select {
+            background-color: #333;
+            color: #c0c0c0;
+            border: 1px solid #555;
+            padding: 3px 6px;
+            border-radius: 3px;
+            font-family: 'Courier New', monospace;
+            outline: none;
+        }
+        
+        .char-set-selector select:hover {
+            background-color: #444;
+        }
+        
+        .char-set-selector select:focus {
+            border-color: #777;
+            box-shadow: 0 0 3px rgba(150, 150, 150, 0.5);
+        }
+        
         /* ASCII art title */
         .ascii-title {
             font-family: monospace;
@@ -278,6 +314,14 @@
                 <label for="ascii-toggle-checkbox">ASCII Mode:</label>
                 <input type="checkbox" id="ascii-toggle-checkbox" checked>
             </div>
+            <div class="char-set-selector">
+                <label for="char-set-select">Character Set:</label>
+                <select id="char-set-select">
+                    <option value="0">Default ASCII</option>
+                    <option value="1">Block Characters</option>
+                    <option value="2">Full Character Set</option>
+                </select>
+            </div>
         </div>
         
         <button id="jump-button" class="jump-button">JUMP (Space)</button>
@@ -293,6 +337,7 @@
                 <li>Click/Tap: Jump</li>
                 <li>P: Pause/Resume</li>
                 <li>A: Toggle ASCII Mode</li>
+                <li>C: Cycle Character Sets</li>
             </ul>
         </div>
         
@@ -322,6 +367,7 @@
         const gameOverMessage = document.getElementById('game-over-message');
         const webglErrorElement = document.getElementById('webgl-error');
         const asciiToggleCheckbox = document.getElementById('ascii-toggle-checkbox');
+        const charSetSelect = document.getElementById('char-set-select');
         
         // Game state
         let score = 0;
@@ -716,11 +762,24 @@
                             asciiToggleCheckbox.checked = !asciiToggleCheckbox.checked;
                             toggleAsciiRendering();
                             break;
+                        case 'c': // C key for cycling through character sets
+                        case 'C':
+                            event.preventDefault();
+                            if (asciiToggleCheckbox.checked) {
+                                // Cycle through character sets
+                                const nextIndex = (parseInt(charSetSelect.value) + 1) % 3;
+                                charSetSelect.value = nextIndex.toString();
+                                changeCharacterSet();
+                            }
+                            break;
                     }
                 });
                 
                 // ASCII toggle event listener
                 asciiToggleCheckbox.addEventListener('change', toggleAsciiRendering);
+                
+                // Character set selector event listener
+                charSetSelect.addEventListener('change', changeCharacterSet);
                 
                 // Function to toggle ASCII rendering
                 function toggleAsciiRendering() {
@@ -736,6 +795,23 @@
                     addLogEntry(useAscii ? 
                         "Switched to ASCII rendering mode" : 
                         "Switched to normal rendering mode");
+                    
+                    // Disable character set selector if ASCII is disabled
+                    charSetSelect.disabled = !useAscii;
+                }
+                
+                // Function to change character set
+                function changeCharacterSet() {
+                    if (!zigModule || typeof zigModule.setCharacterSet !== 'function') return;
+                    
+                    const setIndex = parseInt(charSetSelect.value);
+                    zigModule.setCharacterSet(setIndex);
+                    
+                    const setNames = ["Default ASCII", "Block Characters", "Full Character Set"];
+                    const setName = setNames[setIndex] || "Unknown";
+                    
+                    statusElement.textContent = `Character set changed to: ${setName}`;
+                    addLogEntry(`Changed character set to: ${setName}`);
                 }
                 
                 // Touch events for mobile
