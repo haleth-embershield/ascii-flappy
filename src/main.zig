@@ -222,6 +222,32 @@ const GameData = struct {
 var allocator: std.mem.Allocator = undefined;
 var game: GameData = undefined;
 
+// Export the renderer params for use in renderer.zig
+pub fn getRendererParams() renderer.RenderParams {
+    // Ensure game is initialized
+    if (@intFromPtr(&game) == 0) {
+        // Return a default configuration if game is not initialized
+        const default_chars = " .:-=+*#@%";
+        const default_info = renderer.initAsciiChars(std.heap.wasm_allocator, default_chars) catch unreachable;
+        return renderer.RenderParams{
+            .ascii_chars = default_chars,
+            .ascii_info = default_info,
+            .color = true,
+            .invert_color = false,
+            .block_size = 4,
+            .detect_edges = false,
+            .sigma1 = 0.5,
+            .sigma2 = 1.0,
+            .brightness_boost = 1.5,
+            .threshold_disabled = false,
+            .dither = .None,
+            .bg_color = null,
+            .fg_color = null,
+        };
+    }
+    return game.ascii_renderer;
+}
+
 // Helper to log strings to browser console
 fn logString(msg: []const u8) void {
     consoleLog(msg.ptr, msg.len);

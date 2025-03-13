@@ -886,31 +886,9 @@ pub export fn render_game_frame(ptr: [*]u8, width: usize, height: usize, channel
         .channels = channels,
     };
 
-    // Create renderer parameters
-    const ascii_chars = " .:-=+*#@%"; // Reordered to put more visible characters at the bright end
-    const ascii_info = initAsciiChars(allocator, ascii_chars) catch {
-        const error_msg = "Failed to initialize ASCII characters";
-        consoleLog(error_msg.ptr, error_msg.len);
-        return;
-    };
-
-    // Create mutable params so we can call deinit on it
-    var params = RenderParams{
-        .ascii_chars = ascii_chars,
-        .ascii_info = ascii_info,
-        .color = true,
-        .invert_color = false,
-        .block_size = 4,
-        .detect_edges = false,
-        .sigma1 = 0.5,
-        .sigma2 = 1.0,
-        .brightness_boost = 1.5,
-        .threshold_disabled = false,
-        .dither = .None,
-        .bg_color = null,
-        .fg_color = null,
-    };
-    defer params.deinit(allocator);
+    // Use the game's existing renderer configuration
+    // We'll get this from the game object in main.zig
+    const params = @import("main.zig").getRendererParams();
 
     // Render the ASCII frame
     const frame = renderToAscii(allocator, img, params) catch {
